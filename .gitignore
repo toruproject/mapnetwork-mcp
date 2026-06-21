@@ -1,6 +1,11 @@
 .idea/
+.claude/
 dist/
 __pycache__/
 *.pyc
 *.egg-info/
 .venv/
+mcp-publisher*.exe
+.mcpregistry_github_token
+.mcpregistry_registry_token
+prompt.md
