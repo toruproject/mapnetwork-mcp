@@ -1,6 +1,7 @@
 .idea/
 .claude/
 dist/
+images/
 .venv/
 __pycache__/
 *.pyc
