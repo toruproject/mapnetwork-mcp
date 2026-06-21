@@ -1,0 +1,20 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.toruproject/mapnetwork-mcp",
+  "description": "Generate styled PNG/SVG map images of any location with 11 customizable color themes.",
+  "repository": {
+    "url": "https://github.com/toruproject/mapnetwork-mcp",
+    "source": "github"
+  },
+  "version": "0.1.4",
+  "packages": [
+    {
+      "registryType": "pypi",
+      "identifier": "mapnetwork-mcp",
+      "version": "0.1.4",
+      "transport": {
+        "type": "stdio"
+      }
+    }
+  ]
+}
