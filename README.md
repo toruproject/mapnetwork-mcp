@@ -16,7 +16,7 @@ MCP server for [MapNetwork](https://mapnetwork.app) — generate styled map imag
 **Prompt:** "Generate a map around the 21st Century Museum of Contemporary Art, Kanazawa."
 
 Here is the map it generated:
-<img src="images/Kanazawa21Museum-white.png" width="400" alt="Map Drawing Example">
+<img src="https://raw.githubusercontent.com/toruproject/mapnetwork-mcp/main/images/Kanazawa21Museum-white.png" width="400" alt="Map Drawing Example">
 
 **Prompt:** "Redownload that map in a few different color themes."
 
@@ -24,7 +24,7 @@ The same map, redownloaded in different color themes:
 
 |                       Dark Blue Style                        |                       Light Green Style                        |                          Pop Art Style                           |                        Black Style                        |
 |:------------------------------------------------------------:|:--------------------------------------------------------------:|:----------------------------------------------------------------:|:---------------------------------------------------------:|
-| <img src="images/Kanazawa21Museum-darkBlue.png" width="160"> | <img src="images/Kanazawa21Museum-lightGreen.png" width="160"> | <img src="images/Kanazawa21Museum-popArt.png" width="160"> | <img src="images/Kanazawa21Museum-black.png" width="160"> |
+| <img src="https://raw.githubusercontent.com/toruproject/mapnetwork-mcp/main/images/Kanazawa21Museum-darkBlue.png" width="160"> | <img src="https://raw.githubusercontent.com/toruproject/mapnetwork-mcp/main/images/Kanazawa21Museum-lightGreen.png" width="160"> | <img src="https://raw.githubusercontent.com/toruproject/mapnetwork-mcp/main/images/Kanazawa21Museum-popArt.png" width="160"> | <img src="https://raw.githubusercontent.com/toruproject/mapnetwork-mcp/main/images/Kanazawa21Museum-black.png" width="160"> |
 
 ## Installation
 
