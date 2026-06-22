@@ -10,7 +10,7 @@ import httpx
 from mcp.server.fastmcp import FastMCP, Image
 
 BASE_URL = "https://mapnetwork.app"
-POLL_INTERVAL_SEC = 2.0
+POLL_INTERVAL_SEC = 5.0
 MAX_WAIT_SEC = 120
 
 mcp = FastMCP(
