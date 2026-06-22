@@ -1,6 +1,7 @@
 """MCP server for MapNetwork — generates styled map images from a place name or coordinates."""
 
 import asyncio
+import os
 import re
 from datetime import datetime
 from pathlib import Path
@@ -9,7 +10,7 @@ from typing import Annotated
 import httpx
 from mcp.server.fastmcp import FastMCP, Image
 
-BASE_URL = "https://mapnetwork.app"
+BASE_URL = os.environ.get("MAPNETWORK_BASE_URL", "https://mapnetwork.app")
 POLL_INTERVAL_SEC = 5.0
 MAX_WAIT_SEC = 120
 

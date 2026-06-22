@@ -2,7 +2,7 @@
   "manifest_version": "0.4",
   "name": "mapnetwork-mcp",
   "display_name": "MapNetwork",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Generate styled PNG/SVG map images of any location with 11 customizable color themes.",
   "long_description": "MCP server for MapNetwork — generate styled map images (PNG / SVG) for any location on Earth, directly from Claude.\n\n- Generate maps from a place name, coordinates, or a list of markers\n- 11 color themes (white, darkBlue, darkGreen, popArt, lightBlue, lightGreen, beige, magenta, gray, black, brawn)\n- Overlay walking / driving routes on the map\n- PNG or SVG output, saved to your Downloads folder\n- Re-download a previously generated map in a different theme or format without regenerating\n- Open any generated map in the MapNetwork web editor for manual customization",
   "author": {
