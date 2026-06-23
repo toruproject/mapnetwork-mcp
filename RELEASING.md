@@ -33,6 +33,8 @@ This project's version number is declared in **three places** that must stay in 
    ```
    The registry entry's `packages[0].version` must match the version actually live on PyPI (the registry does not host the code itself).
 
+   ⚠️ `login github` requires manually entering a device confirmation code in the browser — it cannot be automated.
+
 5. **Rebuild the MCPB bundle**
    ```bash
    npx --yes @anthropic-ai/mcpb validate manifest.json
