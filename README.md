@@ -30,6 +30,16 @@ The same map, redownloaded in different color themes:
 
 ### Claude Desktop
 
+#### Using the .mcpb extension file (recommended)
+
+The easiest way to install is via the `.mcpb` extension file available on the [Releases](https://github.com/toruproject/mapnetwork-mcp/releases) page.
+
+1. Download the latest `.mcpb` file from the Releases page.
+2. Open Claude Desktop and go to **Settings** → **Extensions**.
+3. Drag the downloaded `.mcpb` file onto the Extensions panel to install.
+
+#### Manual configuration
+
 Add the following to your `claude_desktop_config.json`:
 
 ```json
