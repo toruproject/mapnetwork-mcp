@@ -31,7 +31,7 @@ mcp = FastMCP(
         "instead of radius — useful when the area of interest is not square\n"
         "- **Layers**: choose which features appear. "
         "Use EXACTLY these values (singular, no trailing 's'): "
-        "'road', 'highway', 'driving', 'walking', 'railway', 'waterline', 'poi'. "
+        "'road', 'highway', 'driving', 'walking', 'railway', 'waterline', 'greenarea', 'poi'. "
         "Wrong: 'roads', 'railways', 'waterlines' — these will be rejected by the server.\n"
         "- **Color themes** via `color_set`: "
         "white (clean, default), darkBlue (navy bg), darkGreen (dark teal bg), "
@@ -237,6 +237,7 @@ async def generate_map(
         "'walking'   — footpaths and pedestrian walkways\n"
         "'railway'   — train and subway lines\n"
         "'waterline' — rivers, lakes, and coastlines\n"
+        "'greenarea' — forests and woods\n"
         "'poi'       — point-of-interest icons (filterable with poi_types)\n"
         "Example for road + railway + POI: ['road', 'railway', 'poi']",
     ] = None,
