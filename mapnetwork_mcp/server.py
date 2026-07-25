@@ -52,7 +52,7 @@ mcp = FastMCP(
         "Use this when the user asks to change only the appearance after already generating the map.\n\n"
         "## Open in the MapNetwork editor\n"
         "Any generated map can be opened and edited interactively in the MapNetwork web UI at:\n"
-        "  https://mapnetwork.app/edit?dataKey=<dataKey>\n"
+        "  https://mapnetwork.app/generate?dataKey=<dataKey>\n"
         "Mention this URL when the user might want to customize markers, colors, or layout manually. "
         "The map data format is identical to what the UI produces when uploading data.\n\n"
         "## Color themes\n"
@@ -366,7 +366,7 @@ async def generate_map(
         (
             f"Map saved: {out_path}\n"
             f"dataKey: {data_key}\n\n"
-            f"Open in editor: https://mapnetwork.app/edit?dataKey={data_key}\n\n"
+            f"Open in editor: https://mapnetwork.app/generate?dataKey={data_key}\n\n"
             f"Tip: call redownload_map(data_key='{data_key}', ...) to get this map "
             f"in a different color_set or format (svg/png) without regenerating."
         ),
