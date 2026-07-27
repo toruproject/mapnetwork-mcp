@@ -201,12 +201,6 @@ async def generate_map(
         "Map name stored in the data file. Used as the default download filename. "
         "Omit to leave unnamed.",
     ] = None,
-    title: Annotated[
-        str | None,
-        "Optional title text rendered in the bottom-left corner of the map image. "
-        "Use when the user wants a label on the map (e.g. the place name or a description). "
-        "Omit to generate an untitled map.",
-    ] = None,
     radius: Annotated[
         int | None,
         "Circular coverage radius in meters (max 2500). "
@@ -305,8 +299,6 @@ async def generate_map(
         body["icon"] = place_icon
     if name is not None:
         body["name"] = name
-    if title is not None:
-        body["title"] = title
     if color_set is not None:
         body["colorSet"] = color_set
     if radius is not None:
