@@ -1,6 +1,6 @@
 [project]
 name = "mapnetwork-mcp"
-version = "1.0.0"
+version = "1.1.0"
 description = "MCP server — generate styled map images via mapnetwork.app"
 readme = "README.md"
 requires-python = ">=3.11"
