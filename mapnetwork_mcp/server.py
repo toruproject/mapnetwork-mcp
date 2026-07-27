@@ -248,6 +248,15 @@ async def generate_map(
         "To customise the line color, add a 'color' key: {**route_result, 'color': '#FF4500'}. "
         "Omit to generate a map without a route overlay.",
     ] = None,
+    config: Annotated[
+        dict | None,
+        "Overrides for automatic layer-visibility defaults. Omit any field to keep the default. "
+        "Fields (all optional booleans): "
+        "'patchworked' (auto-color closed areas and building shapes, default true), "
+        "'withBuilding' (draw building shapes, default true when building data is available), "
+        "'withSeaRibbon' (draw a band representing the sea along the coastline, default true when coastline data is available). "
+        "Example to turn off buildings: {\"withBuilding\": false}.",
+    ] = None,
     color_set: Annotated[
         str | None,
         "Color theme for the map. Only set when the user explicitly requests one. "
@@ -309,6 +318,8 @@ async def generate_map(
         body["poiTypes"] = poi_types
     if route is not None:
         body["route"] = route
+    if config is not None:
+        body["config"] = config
 
     async with httpx.AsyncClient() as client:
         # 1. Enqueue
