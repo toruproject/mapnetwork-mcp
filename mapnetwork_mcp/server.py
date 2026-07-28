@@ -5,14 +5,70 @@ import os
 import re
 from datetime import datetime
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Literal
 
 import httpx
 from mcp.server.fastmcp import FastMCP, Image
+from pydantic import BaseModel, ConfigDict, Field
 
 BASE_URL = os.environ.get("MAPNETWORK_BASE_URL", "https://mapnetwork.app")
 POLL_INTERVAL_SEC = 10.0
 MAX_WAIT_SEC = 600
+
+# layersは自由な多値配列にすると、モデルが「roadはhighway/driving/walkingの上位互換」
+# といった内部の組み合わせルールを知らないまま組み合わせを選んでしまう。
+# 人間側で意味のある4パターンだけに絞り込み、モデルにはこのプリセット名だけを選ばせる。
+_LAYER_PRESETS: dict[str, list[str]] = {
+    "default": ["road", "poi"],
+    "road_and_railway": ["road", "railway", "poi"],
+    "only_driving_road": ["driving"],
+    "fully_detailed": ["road", "railway", "poi", "waterline", "greenarea"],
+}
+
+
+class Location(BaseModel):
+    lat: float
+    lng: float
+
+
+class Marker(BaseModel):
+    label: str | None = Field(default=None, description="Place name for geocoding and/or display.")
+    location: Location | None = Field(
+        default=None,
+        description="Explicit coordinates. If provided, geocoding of 'label' is skipped.",
+    )
+
+
+class RouteEndpoint(BaseModel):
+    label: str | None = Field(default=None, description="Place name for geocoding and/or display.")
+    location: Location | None = Field(default=None, description="Explicit coordinates.")
+
+
+class RouteInput(BaseModel):
+    """generate_mapのrouteパラメータ。compute_routeの戻り値をそのまま渡せる形にする。"""
+    model_config = ConfigDict(populate_by_name=True)
+
+    coords: list[list[float]] | None = Field(
+        default=None, description="Ordered list of [lat, lng] pairs along the route."
+    )
+    mode: Literal["walking", "driving"] | None = None
+    from_: RouteEndpoint | None = Field(default=None, alias="from", description="Route start point.")
+    to: RouteEndpoint | None = Field(default=None, description="Route end point.")
+    color: str | None = Field(default=None, description="Optional line color as a CSS hex color (e.g. '#FF4500').")
+
+
+class MapConfig(BaseModel):
+    patchworked: bool | None = Field(
+        default=None, description="Auto-color closed areas and building shapes on the drawing. Default true."
+    )
+    withBuilding: bool | None = Field(
+        default=None, description="Draw building shapes. Default true when building data is available."
+    )
+    withSeaRibbon: bool | None = Field(
+        default=None,
+        description="Draw a band representing the sea along the coastline. Default true when coastline data is available.",
+    )
+
 
 mcp = FastMCP(
     "MapNetwork",
@@ -29,10 +85,10 @@ mcp = FastMCP(
         "- **Circular area**: specify `radius` in meters (default 500, max 2500) around the center\n"
         "- **Rectangular area**: specify `size_ew` (east-west) and `size_ns` (north-south) in meters "
         "instead of radius — useful when the area of interest is not square\n"
-        "- **Layers**: choose which features appear. "
-        "Use EXACTLY these values (singular, no trailing 's'): "
-        "'road', 'highway', 'driving', 'walking', 'railway', 'waterline', 'greenarea', 'poi'. "
-        "Wrong: 'roads', 'railways', 'waterlines' — these will be rejected by the server.\n"
+        "- **Layers**: choose a preset via `layers` — 'default' (roads + POI), "
+        "'only_driving_road' (car-accessible roads only), 'road_and_railway' (roads + railway, no POI), "
+        "or 'fully_detailed' (roads + railway + waterline + greenarea + POI; waterline/greenarea only "
+        "apply within Japan). Omit for 'default'.\n"
         "- **Color themes** via `color_set`: "
         "white (clean, default), darkBlue (navy bg), darkGreen (dark teal bg), "
         "popArt (blue bg, bold contrast), lightBlue (pale blue bg), lightGreen (pale green bg), "
@@ -105,14 +161,13 @@ async def _download(client: httpx.AsyncClient, data_key: str, format: str,
 @mcp.tool()
 async def compute_route(
     from_location: Annotated[
-        dict,
-        "Start point of the route. "
-        "Use {\"label\": \"place name\"} to geocode server-side, "
-        "or {\"label\": \"...\", \"location\": {\"lat\": ..., \"lng\": ...}} to supply explicit coordinates. "
-        "Example: {\"label\": \"赤坂駅\"}",
+        RouteEndpoint,
+        "Start point of the route. Provide 'location' for explicit coordinates (no geocoding), "
+        "or only 'label' to geocode server-side. Both may be provided — 'location' takes precedence, "
+        "'label' is used for display. Example: {\"label\": \"赤坂駅\"}",
     ],
     to_location: Annotated[
-        dict,
+        RouteEndpoint,
         "End point of the route. Same format as from_location. "
         "Example: {\"label\": \"赤坂氷川神社\"}",
     ],
@@ -134,7 +189,11 @@ async def compute_route(
     if mode not in ("walking", "driving"):
         raise ValueError("mode must be 'walking' or 'driving'")
 
-    body = {"from": from_location, "to": to_location, "mode": mode}
+    body = {
+        "from": from_location.model_dump(exclude_none=True),
+        "to": to_location.model_dump(exclude_none=True),
+        "mode": mode,
+    }
     async with httpx.AsyncClient() as client:
         resp = await client.post(f"{BASE_URL}/route", json=body, timeout=180)
         if resp.status_code == 404:
@@ -177,24 +236,12 @@ async def generate_map(
         "Omit when using markers-only mode.",
     ] = None,
     markers: Annotated[
-        list[dict] | None,
+        list[Marker] | None,
         "List of locations to pin on the map as blue markers. "
-        "Each item: {\"label\": \"place name\"} — the server geocodes it automatically. "
-        "Optionally include explicit coordinates: {\"label\": \"...\", \"location\": {\"lat\": ..., \"lng\": ...}}. "
-        "Each marker may also include an optional \"icon\" field to override its appearance: "
-        "{\"label\": \"...\", \"icon\": {\"color\": \"#ff0000\"}}. "
-        "All icon sub-fields (code/size/color) are optional — omit any to keep the default. "
+        "Each item needs only a 'label' (geocoded automatically); explicit 'location' {lat, lng} is optional. "
         "When markers are provided without place/lat/lng, the server derives the map center from their centroid "
         "and sets radius automatically. "
         "Example for two stations: [{\"label\": \"東京駅\"}, {\"label\": \"新宿駅\"}]",
-    ] = None,
-    place_icon: Annotated[
-        dict | None,
-        "Custom icon for the `place` pin (or center pin if no `place`). "
-        "All fields are optional — specify only what you want to override. "
-        "Fields: code (FontAwesome \\uXXXX), size (pixels), color (CSS hex). "
-        "Example (red icon, larger): {\"color\": \"#ff0000\", \"size\": 50}. "
-        "Omit entirely to use the default icon.",
     ] = None,
     name: Annotated[
         str | None,
@@ -222,39 +269,24 @@ async def generate_map(
         "ONLY set this when the user has explicitly requested a rectangular area of specific dimensions.",
     ] = None,
     layers: Annotated[
-        list[str] | None,
-        "Map layers to render. Default ['road', 'poi']. "
-        "IMPORTANT: use EXACTLY these singular spellings — never add 's' or change the spelling:\n"
-        "'road'      — all roads (supersedes highway/driving/walking; no need to add them when road is present)\n"
-        "'highway'   — major roads only\n"
-        "'driving'   — car-accessible roads\n"
-        "'walking'   — footpaths and pedestrian walkways\n"
-        "'railway'   — train and subway lines\n"
-        "'waterline' — rivers, lakes, and coastlines\n"
-        "'greenarea' — forests and woods\n"
-        "'poi'       — point-of-interest icons (filterable with poi_types)\n"
-        "Example for road + railway + POI: ['road', 'railway', 'poi']",
-    ] = None,
-    poi_types: Annotated[
-        list[str] | None,
-        "Filter POI categories when 'poi' is in layers. Omit to include all. "
-        "Valid values: museum, library, theatre, convenience, supermarket, "
-        "school, religion, station, park, hospital, cityhall, cafe, restaurant.",
+        Literal["default", "road_and_railway", "only_driving_road", "fully_detailed"] | None,
+        "Preset combination of map layers. 'default': roads + POI icons. "
+        "'only_driving_road': car-accessible roads only, nothing else. "
+        "'road_and_railway': roads + railway lines, no POI. "
+        "'fully_detailed': roads + railway + waterline + greenarea + POI "
+        "(waterline/greenarea only apply within Japan; ignored elsewhere). "
+        "Omit for 'default'.",
     ] = None,
     route: Annotated[
-        dict | None,
+        RouteInput | None,
         "Route to overlay on the map. Pass the full response from compute_route() directly — "
         "the server uses coords and (optionally) color from it. "
-        "To customise the line color, add a 'color' key: {**route_result, 'color': '#FF4500'}. "
+        "To customise the line color, set/override the 'color' field (e.g. '#FF4500'). "
         "Omit to generate a map without a route overlay.",
     ] = None,
     config: Annotated[
-        dict | None,
+        MapConfig | None,
         "Overrides for automatic layer-visibility defaults. Omit any field to keep the default. "
-        "Fields (all optional booleans): "
-        "'patchworked' (auto-color closed areas and building shapes, default true), "
-        "'withBuilding' (draw building shapes, default true when building data is available), "
-        "'withSeaRibbon' (draw a band representing the sea along the coastline, default true when coastline data is available). "
         "Example to turn off buildings: {\"withBuilding\": false}.",
     ] = None,
     color_set: Annotated[
@@ -269,12 +301,7 @@ async def generate_map(
         "Output file format: 'png' (default, raster image) or 'svg' (vector, scalable to any size).",
     ] = "png",
     canvas_width: Annotated[int | None, "Canvas width in pixels. Omit to use server default (1000)."] = None,
-    canvas_height: Annotated[int | None, "Canvas height in pixels. Omit to use server default (700)."] = None,
-    edge_weight: Annotated[
-        int | None,
-        "Road and line width adjustment. Positive values thicken lines, negative values thin them. "
-        "Default 0 (no adjustment). Example: 2 to make roads slightly thicker, -1 to make them thinner.",
-    ] = None,
+    canvas_height: Annotated[int | None, "Canvas height in pixels. Omit to use server default (600)."] = None,
 ) -> list:
     """Generate a styled map image for a given location and save it to Downloads.
 
@@ -288,8 +315,9 @@ async def generate_map(
     without waiting for regeneration.
     """
     has_center = place or (lat is not None and lng is not None)
-    if not has_center and not markers:
-        raise ValueError("Specify 'place', both 'lat'+'lng', or 'markers'.")
+    has_route_coords = route is not None and route.coords is not None and len(route.coords) >= 2
+    if not has_center and not markers and not has_route_coords:
+        raise ValueError("Specify 'place', both 'lat'+'lng', 'markers', or a 'route' with coords.")
     if radius is not None and (size_ew is not None or size_ns is not None):
         raise ValueError("Specify either 'radius' or 'size_ew'+'size_ns', not both.")
     if (size_ew is None) != (size_ns is None):
@@ -297,15 +325,13 @@ async def generate_map(
 
     body: dict = {}
     if layers is not None:
-        body["layers"] = layers
+        body["layers"] = _LAYER_PRESETS[layers]
     if place:
         body["place"] = place
     elif lat is not None and lng is not None:
         body["center"] = {"lat": lat, "lng": lng}
     if markers is not None:
-        body["markers"] = markers
-    if place_icon is not None:
-        body["icon"] = place_icon
+        body["markers"] = [m.model_dump(exclude_none=True) for m in markers]
     if name is not None:
         body["name"] = name
     if color_set is not None:
@@ -314,12 +340,10 @@ async def generate_map(
         body["radius"] = radius
     elif size_ew is not None:
         body["size"] = {"ew": size_ew, "ns": size_ns}
-    if poi_types:
-        body["poiTypes"] = poi_types
     if route is not None:
-        body["route"] = route
+        body["route"] = route.model_dump(by_alias=True, exclude_none=True)
     if config is not None:
-        body["config"] = config
+        body["config"] = config.model_dump(exclude_none=True)
 
     async with httpx.AsyncClient() as client:
         # 1. Enqueue
@@ -353,14 +377,16 @@ async def generate_map(
 
         # 3. Download
         image_bytes = await _download(client, data_key, format, color_set,
-                                      canvas_width, canvas_height, edge_weight)
+                                      canvas_width, canvas_height)
 
     if place:
         label = place
     elif lat is not None and lng is not None:
         label = f"{lat}_{lng}"
+    elif markers:
+        label = "_".join(m.label or "" for m in markers)[:40]
     else:
-        label = "_".join(m.get("label", "") for m in (markers or []))[:40]
+        label = "route"
     out_path = _make_filename(label, format)
     out_path.write_bytes(image_bytes)
 
@@ -397,7 +423,7 @@ async def redownload_map(
         "'png' (raster) or 'svg' (vector, infinitely scalable).",
     ] = "png",
     canvas_width: Annotated[int | None, "Canvas width in pixels. Omit to use server default (1000)."] = None,
-    canvas_height: Annotated[int | None, "Canvas height in pixels. Omit to use server default (700)."] = None,
+    canvas_height: Annotated[int | None, "Canvas height in pixels. Omit to use server default (600)."] = None,
     edge_weight: Annotated[
         int | None,
         "Road and line width adjustment. Positive values thicken lines, negative values thin them. "
