@@ -96,6 +96,7 @@ The key difference from this local server is how you receive the generated map i
 - "渋谷駅周辺の地図を作って"
 - "赤坂駅から赤坂氷川神社までの徒歩ルートを地図にして"
 - "東京駅・日本橋駅・京橋駅を1枚の地図に表示して"
+- "日比谷公園の1キロ四方の地図を出して"
 - "その地図を darkBlue テーマでSVG画像で出し直して"
 - "生成した地図の編集用リンクをください"
 
@@ -103,6 +104,7 @@ The key difference from this local server is how you receive the generated map i
 - "Generate a map around Shibuya Station"
 - "Show a walking route from Akasaka Station to Akasaka Hikawa Shrine on a map"
 - "Put Tokyo Station, Nihonbashi Station, and Kyobashi Station on a single map"
+- "Show a 1km square map of Hibiya Park"
 - "Redownload that map as an SVG in the darkBlue theme"
 - "Give me a link to edit the generated map"
 
