@@ -70,6 +70,18 @@ pip install mapnetwork-mcp
 }
 ```
 
+## Remote MCP Server
+
+You can also use MapNetwork through MCP without installing anything, via the remote MCP server:
+
+```
+https://mapnetwork.app/mcp
+```
+
+In Claude, go to **Settings** → **Connectors** → **Add custom connector** and register the URL above.
+
+The key difference from this local server is how you receive the generated map image. Since `mapnetwork-mcp` runs on your PC, it can save the generated image directly to your Downloads folder. The remote server can't do this — most AI assistants are unable to properly display or save tool-result images within the chat — so instead of image data, it returns a text response with a download link and a link to edit the map at [mapnetwork.app](https://mapnetwork.app). Open the links in a browser to view or save the image, or to edit the map.
+
 ## Tools
 
 | Tool | Description |
@@ -85,16 +97,19 @@ pip install mapnetwork-mcp
 - "赤坂駅から赤坂氷川神社までの徒歩ルートを地図にして"
 - "東京駅・日本橋駅・京橋駅を1枚の地図に表示して"
 - "その地図を darkBlue テーマでSVG画像で出し直して"
+- "生成した地図の編集用リンクをください"
 
 **English**
 - "Generate a map around Shibuya Station"
 - "Show a walking route from Akasaka Station to Akasaka Hikawa Shrine on a map"
 - "Put Tokyo Station, Nihonbashi Station, and Kyobashi Station on a single map"
 - "Redownload that map as an SVG in the darkBlue theme"
+- "Give me a link to edit the generated map"
 
 ## Links
 
 - Web UI: [https://mapnetwork.app](https://mapnetwork.app)
+- Web UI Manual: [https://mapnetwork.app/manual](https://mapnetwork.app/manual)
 - API docs: [https://mapnetwork.app/openapi.json](https://mapnetwork.app/openapi.json)
 
 mcp-name: io.github.toruproject/mapnetwork-mcp
