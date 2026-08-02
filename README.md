@@ -22,9 +22,9 @@ Here is the map it generated:
 
 The same map, redownloaded in different color themes:
 
-|                       Dark Blue Style                        |                       Light Green Style                        |                          Pop Art Style                           |                        Black Style                        |
-|:------------------------------------------------------------:|:--------------------------------------------------------------:|:----------------------------------------------------------------:|:---------------------------------------------------------:|
-| <img src="https://raw.githubusercontent.com/toruproject/mapnetwork-mcp/main/images/Kanazawa21Museum-darkBlue.png" width="160"> | <img src="https://raw.githubusercontent.com/toruproject/mapnetwork-mcp/main/images/Kanazawa21Museum-lightGreen.png" width="160"> | <img src="https://raw.githubusercontent.com/toruproject/mapnetwork-mcp/main/images/Kanazawa21Museum-popArt.png" width="160"> | <img src="https://raw.githubusercontent.com/toruproject/mapnetwork-mcp/main/images/Kanazawa21Museum-black.png" width="160"> |
+|                                                        Dark Green Style                                                         |                       Light Green Style                        |                          Pop Art Style                           |                        Black Style                        |
+|:-------------------------------------------------------------------------------------------------------------------------------:|:--------------------------------------------------------------:|:----------------------------------------------------------------:|:---------------------------------------------------------:|
+| <img src="https://raw.githubusercontent.com/toruproject/mapnetwork-mcp/main/images/Kanazawa21Museum-darkGreen.png" width="160"> | <img src="https://raw.githubusercontent.com/toruproject/mapnetwork-mcp/main/images/Kanazawa21Museum-lightGreen.png" width="160"> | <img src="https://raw.githubusercontent.com/toruproject/mapnetwork-mcp/main/images/Kanazawa21Museum-popArt.png" width="160"> | <img src="https://raw.githubusercontent.com/toruproject/mapnetwork-mcp/main/images/Kanazawa21Museum-black.png" width="160"> |
 
 ## Installation
 
