@@ -14,6 +14,13 @@ from pydantic import BaseModel, ConfigDict, Field
 BASE_URL = os.environ.get("MAPNETWORK_BASE_URL", "https://mapnetwork.app")
 POLL_INTERVAL_SEC = 10.0
 MAX_WAIT_SEC = 600
+# MCPクライアントによっては、report_progressで進捗通知を送ってもtools/call自体の
+# クライアント側タイムアウトを延長してくれない(60秒固定のクライアントで実測確認済み)。
+# そのため generate_map は内部ポーリングをこの秒数までに打ち切り、まだ終わっていなければ
+# dataKeyを返してcheck_map_statusでの確認をモデルに促す。60秒に対して十分な余裕を残す値にする。
+INITIAL_WAIT_SEC = 40.0
+# check_map_statusをモデルが連打しても機械的に間隔が空くようにする最低待機時間
+CHECK_THROTTLE_SEC = 5.0
 
 # layersは自由な多値配列にすると、モデルが「roadはhighway/driving/walkingの上位互換」
 # といった内部の組み合わせルールを知らないまま組み合わせを選んでしまう。
@@ -101,6 +108,12 @@ mcp = FastMCP(
         "2. Call `generate_map` with `route=<result>` and `markers=[result['from'], result['to']]`\n"
         "The route is drawn on top of all other layers. "
         "Add `'color': '#RRGGBB'` to the route dict to customise the line color.\n\n"
+        "## If generation is still in progress\n"
+        "For busy areas, `generate_map` may return before the map is ready, with a `dataKey` "
+        "and a message asking you to check back. In that case, wait about 20-30 seconds and "
+        "call `check_map_status(dataKey=...)` — do not call `generate_map` again for the same "
+        "location, that only starts a redundant duplicate job. Repeat `check_map_status` "
+        "(with the same wait between calls) until it returns the image.\n\n"
         "## Important: re-download without regenerating\n"
         "After generating a map, `generate_map` returns a `dataKey`. "
         "You can call `redownload_map` with that `dataKey` to get the same map in a different "
@@ -152,6 +165,56 @@ async def _download(client: httpx.AsyncClient, data_key: str, format: str,
     if resp.status_code != 200:
         raise RuntimeError(f"Download failed ({resp.status_code}): {resp.text}")
     return resp.content
+
+
+async def _poll_with_budget(
+    client: httpx.AsyncClient, data_key: str, budget_sec: float, ctx: Context | None,
+) -> str:
+    """dataKeyの状態をPOLL_INTERVAL_SEC間隔でbudget_sec以内までポーリングする。
+    "ready"/"failed"になればその時点で返す。budget_sec内に決着しなければ"pending"を
+    返す(例外は投げない、呼び出し側で分岐する)。"""
+    if ctx is not None:
+        await ctx.report_progress(0, budget_sec, "Map generation queued...")
+    elapsed = 0.0
+    while elapsed < budget_sec:
+        await asyncio.sleep(POLL_INTERVAL_SEC)
+        elapsed += POLL_INTERVAL_SEC
+        status_resp = await client.get(
+            f"{BASE_URL}/status", params={"dataKey": data_key}, timeout=10
+        )
+        status = status_resp.json().get("status")
+        if status in ("ready", "failed"):
+            return status
+        if ctx is not None:
+            await ctx.report_progress(
+                elapsed, budget_sec, f"Map generation in progress... ({elapsed:.0f}s elapsed)"
+            )
+    return "pending"
+
+
+def _build_success_result(image_bytes: bytes, out_path: Path, data_key: str) -> list:
+    out_path.write_bytes(image_bytes)
+    return [
+        Image(data=image_bytes, format="png"),
+        (
+            f"Map saved: {out_path}\n"
+            f"dataKey: {data_key}\n\n"
+            f"Open in editor: https://mapnetwork.app/generate?dataKey={data_key}\n\n"
+            f"Tip: call redownload_map(data_key='{data_key}', ...) to get this map "
+            f"in a different color_set or format (svg/png) without regenerating."
+        ),
+    ]
+
+
+def _still_in_progress_result(data_key: str) -> list:
+    return [(
+        f"Map generation is still in progress (dataKey={data_key}). This can take a few "
+        "minutes for busy areas. Wait about 20-30 seconds, then call "
+        f"check_map_status(data_key='{data_key}') to check again — pass the same format/"
+        "color_set/canvas_width/canvas_height you used with generate_map, if any. "
+        "Do NOT call generate_map again for the same location — that starts a redundant "
+        "duplicate job and wastes time."
+    )]
 
 
 # ---------------------------------------------------------------------------
@@ -314,6 +377,11 @@ async def generate_map(
     After generation the dataKey is returned in the text result.
     Use redownload_map(dataKey=...) to get the same map in a different color or format
     without waiting for regeneration.
+
+    If generation is still running after a short wait, this returns a dataKey and asks
+    you to call check_map_status(dataKey=...) after a delay instead of returning the
+    image directly — do not call generate_map again for the same location in that case,
+    it would just start a redundant duplicate job.
     """
     has_center = place or (lat is not None and lng is not None)
     has_route_coords = route is not None and route.coords is not None and len(route.coords) >= 2
@@ -357,34 +425,20 @@ async def generate_map(
             raise RuntimeError(f"Request rejected ({resp.status_code}): {detail}")
         data_key = resp.json()["dataKey"]
 
-        # 2. Poll until ready
-        # ポーリング中に進捗通知を送らないと、クライアント側のタイムアウトが
-        # (MAX_WAIT_SECより手前で)先に発火し、実際には裏で処理が続いているのに
-        # クライアントには失敗したように見えてしまう。report_progressはprogressToken
-        # が無いクライアントに対しては何もしない安全な呼び出しなので、常に呼んでよい。
-        if ctx is not None:
-            await ctx.report_progress(0, MAX_WAIT_SEC, "Map generation queued...")
-        elapsed = 0.0
-        while elapsed < MAX_WAIT_SEC:
-            await asyncio.sleep(POLL_INTERVAL_SEC)
-            elapsed += POLL_INTERVAL_SEC
-            status_resp = await client.get(
-                f"{BASE_URL}/status", params={"dataKey": data_key}, timeout=10
+        # 2. Poll, but only up to INITIAL_WAIT_SEC (安全のためMCPクライアントの典型的な
+        # 60秒タイムアウトより十分短くしてある)。多くの地図生成はこの範囲で終わるため、
+        # その場合はこの1回の呼び出しだけで完結する。間に合わなければ、ここで打ち切って
+        # dataKeyを返し、check_map_statusでの確認をモデルに促す(生成自体はバックエンドで
+        # 継続しているので、ここで諦めても失敗にはならない)。
+        status = await _poll_with_budget(client, data_key, INITIAL_WAIT_SEC, ctx)
+
+        if status == "failed":
+            raise RuntimeError(
+                f"Map generation failed (dataKey={data_key}). "
+                "Try a different location or smaller radius."
             )
-            status = status_resp.json().get("status")
-            if status == "ready":
-                break
-            if status == "failed":
-                raise RuntimeError(
-                    f"Map generation failed (dataKey={data_key}). "
-                    "Try a different location or smaller radius."
-                )
-            if ctx is not None:
-                await ctx.report_progress(
-                    elapsed, MAX_WAIT_SEC, f"Map generation in progress... ({elapsed:.0f}s elapsed)"
-                )
-        else:
-            raise TimeoutError(f"Map generation timed out after {MAX_WAIT_SEC}s.")
+        if status == "pending":
+            return _still_in_progress_result(data_key)
 
         # 3. Download
         image_bytes = await _download(client, data_key, format, color_set,
@@ -398,19 +452,57 @@ async def generate_map(
         label = "_".join(m.label or "" for m in markers)[:40]
     else:
         label = "route"
-    out_path = _make_filename(label, format)
-    out_path.write_bytes(image_bytes)
+    return _build_success_result(image_bytes, _make_filename(label, format), data_key)
 
-    return [
-        Image(data=image_bytes, format="png" if format == "png" else "png"),
-        (
-            f"Map saved: {out_path}\n"
-            f"dataKey: {data_key}\n\n"
-            f"Open in editor: https://mapnetwork.app/generate?dataKey={data_key}\n\n"
-            f"Tip: call redownload_map(data_key='{data_key}', ...) to get this map "
-            f"in a different color_set or format (svg/png) without regenerating."
-        ),
-    ]
+
+# ---------------------------------------------------------------------------
+# Tool: check_map_status
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+async def check_map_status(
+    data_key: Annotated[
+        str,
+        "The dataKey returned by a generate_map call that reported it was still in progress.",
+    ],
+    color_set: Annotated[
+        str | None,
+        "Color theme, matching what generate_map was called with, if any.",
+    ] = None,
+    format: Annotated[
+        str,
+        "'png' or 'svg', matching what generate_map was called with.",
+    ] = "png",
+    canvas_width: Annotated[int | None, "Canvas width, matching what generate_map was called with, if any."] = None,
+    canvas_height: Annotated[int | None, "Canvas height, matching what generate_map was called with, if any."] = None,
+    ctx: Context = None,
+) -> list:
+    """Check whether a still-in-progress generate_map job has finished, and download it if so.
+
+    Only call this after generate_map reports it is still processing and gives you a
+    dataKey to check. Wait about 20-30 seconds between calls to this tool — do not call
+    it in a tight loop, and do not call generate_map again for the same location while a
+    job with this dataKey is still pending; that just starts a redundant duplicate job.
+    """
+    async with httpx.AsyncClient() as client:
+        # 連打されても機械的に間隔が空くようにする最低限のスロットル
+        await asyncio.sleep(CHECK_THROTTLE_SEC)
+        status_resp = await client.get(f"{BASE_URL}/status", params={"dataKey": data_key}, timeout=10)
+        status = status_resp.json().get("status")
+        if status == "failed":
+            raise RuntimeError(
+                f"Map generation failed (dataKey={data_key}). "
+                "Try a different location or smaller radius."
+            )
+        if status != "ready":
+            if ctx is not None:
+                await ctx.report_progress(0, 1, "Map generation still in progress...")
+            return _still_in_progress_result(data_key)
+
+        image_bytes = await _download(client, data_key, format, color_set,
+                                      canvas_width, canvas_height)
+
+    return _build_success_result(image_bytes, _make_filename(data_key, format), data_key)
 
 
 # ---------------------------------------------------------------------------
