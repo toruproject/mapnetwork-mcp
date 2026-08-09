@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Annotated, Literal
 
 import httpx
-from mcp.server.fastmcp import FastMCP, Image
+from mcp.server.fastmcp import Context, FastMCP, Image
 from pydantic import BaseModel, ConfigDict, Field
 
 BASE_URL = os.environ.get("MAPNETWORK_BASE_URL", "https://mapnetwork.app")
@@ -302,6 +302,7 @@ async def generate_map(
     ] = "png",
     canvas_width: Annotated[int | None, "Canvas width in pixels. Omit to use server default (1000)."] = None,
     canvas_height: Annotated[int | None, "Canvas height in pixels. Omit to use server default (600)."] = None,
+    ctx: Context = None,
 ) -> list:
     """Generate a styled map image for a given location and save it to Downloads.
 
@@ -357,6 +358,12 @@ async def generate_map(
         data_key = resp.json()["dataKey"]
 
         # 2. Poll until ready
+        # ポーリング中に進捗通知を送らないと、クライアント側のタイムアウトが
+        # (MAX_WAIT_SECより手前で)先に発火し、実際には裏で処理が続いているのに
+        # クライアントには失敗したように見えてしまう。report_progressはprogressToken
+        # が無いクライアントに対しては何もしない安全な呼び出しなので、常に呼んでよい。
+        if ctx is not None:
+            await ctx.report_progress(0, MAX_WAIT_SEC, "Map generation queued...")
         elapsed = 0.0
         while elapsed < MAX_WAIT_SEC:
             await asyncio.sleep(POLL_INTERVAL_SEC)
@@ -371,6 +378,10 @@ async def generate_map(
                 raise RuntimeError(
                     f"Map generation failed (dataKey={data_key}). "
                     "Try a different location or smaller radius."
+                )
+            if ctx is not None:
+                await ctx.report_progress(
+                    elapsed, MAX_WAIT_SEC, f"Map generation in progress... ({elapsed:.0f}s elapsed)"
                 )
         else:
             raise TimeoutError(f"Map generation timed out after {MAX_WAIT_SEC}s.")
