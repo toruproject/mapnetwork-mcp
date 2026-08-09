@@ -1,11 +1,14 @@
 [project]
 name = "mapnetwork-mcp"
-version = "1.2.1"
+version = "1.2.2"
 description = "MCP server — generate styled map images via mapnetwork.app"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    "mcp[cli]>=1.0.0",
+    # mcp 2.0.0はmcp.server.fastmcp(Context/FastMCP/Image)を含む破壊的変更が入っており、
+    # このコードと互換性が無い。uv runはpyproject.toml変更のたびに新しいvenvを作るため、
+    # 上限を付けないと知らぬ間に非互換バージョンへ切り替わってしまう
+    "mcp[cli]>=1.0.0,<2.0.0",
     "httpx>=0.27.0",
 ]
 
