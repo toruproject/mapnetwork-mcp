@@ -1,6 +1,6 @@
 [project]
 name = "mapnetwork-mcp"
-version = "1.2.3"
+version = "2.0.0"
 description = "MCP server — generate styled map images via mapnetwork.app"
 readme = "README.md"
 license = "MIT"
@@ -28,5 +28,7 @@ exclude = ["/.idea", "/dist", "__pycache__", "/mcp-publisher*.exe", "/server.jso
 exclude = ["/.idea", "__pycache__"]
 
 [build-system]
-requires = ["hatchling"]
+# hatchling>=1.32はMetadata-Version 2.5を出力するが、現行のpackaging/twineが
+# まだ認識せず"twine check"が壊れる(2.4を出力する1.31系に固定して回避)
+requires = ["hatchling<1.32"]
 build-backend = "hatchling.build"
