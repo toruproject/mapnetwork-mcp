@@ -34,8 +34,8 @@ _LAYER_PRESETS: dict[str, list[str]] = {
 
 
 class Location(BaseModel):
-    lat: float
-    lng: float
+    lat: float = Field(description="Latitude.")
+    lng: float = Field(description="Longitude.")
 
 
 class Marker(BaseModel):
@@ -58,23 +58,10 @@ class RouteInput(BaseModel):
     coords: list[list[float]] | None = Field(
         default=None, description="Ordered list of [lat, lng] pairs along the route."
     )
-    mode: Literal["walking", "driving"] | None = None
+    mode: Literal["walking", "driving"] | None = Field(default=None, description="'walking' or 'driving'.")
     from_: RouteEndpoint | None = Field(default=None, alias="from", description="Route start point.")
     to: RouteEndpoint | None = Field(default=None, description="Route end point.")
     color: str | None = Field(default=None, description="Optional line color as a CSS hex color (e.g. '#FF4500').")
-
-
-class MapConfig(BaseModel):
-    patchworked: bool | None = Field(
-        default=None, description="Auto-color closed areas and building shapes on the drawing. Default true."
-    )
-    withBuilding: bool | None = Field(
-        default=None, description="Draw building shapes. Default true when building data is available."
-    )
-    withSeaRibbon: bool | None = Field(
-        default=None,
-        description="Draw a band representing the sea along the coastline. Default true when coastline data is available.",
-    )
 
 
 mcp = FastMCP(
@@ -150,8 +137,7 @@ def _make_filename(label: str, format: str) -> Path:
 
 
 async def _download(client: httpx.AsyncClient, data_key: str, format: str,
-                    color_set: str | None, canvas_width: int | None, canvas_height: int | None,
-                    edge_weight: int | None = None) -> bytes:
+                    color_set: str | None, canvas_width: int | None, canvas_height: int | None) -> bytes:
     params: dict = {"dataKey": data_key, "format": format}
     if color_set is not None:
         params["colorSet"] = color_set
@@ -159,8 +145,6 @@ async def _download(client: httpx.AsyncClient, data_key: str, format: str,
         params["canvasWidth"] = canvas_width
     if canvas_height is not None:
         params["canvasHeight"] = canvas_height
-    if edge_weight is not None:
-        params["edgeWeight"] = edge_weight
     resp = await client.get(f"{BASE_URL}/download", params=params, timeout=60)
     if resp.status_code != 200:
         raise RuntimeError(f"Download failed ({resp.status_code}): {resp.text}")
@@ -224,34 +208,15 @@ def _still_in_progress_result(data_key: str) -> list:
 @mcp.tool()
 async def compute_route(
     from_location: Annotated[
-        RouteEndpoint,
-        "Start point of the route. Provide 'location' for explicit coordinates (no geocoding), "
-        "or only 'label' to geocode server-side. Both may be provided — 'location' takes precedence, "
-        "'label' is used for display. Example: {\"label\": \"赤坂駅\"}",
+        RouteEndpoint, Field(description="Route start. 'location' for coordinates, or 'label' to geocode.")
     ],
-    to_location: Annotated[
-        RouteEndpoint,
-        "End point of the route. Same format as from_location. "
-        "Example: {\"label\": \"赤坂氷川神社\"}",
-    ],
-    mode: Annotated[
-        str,
-        "Routing mode: 'walking' (default, footpaths and streets) or 'driving' (car-accessible roads).",
-    ] = "walking",
+    to_location: Annotated[RouteEndpoint, Field(description="Route end. Same format as from_location.")],
+    mode: Annotated[Literal["walking", "driving"], Field(description="Default 'walking'.")] = "walking",
 ) -> dict:
-    """Compute a walking or driving route between two locations.
+    """Compute a route. Returns {coords, from, to} — pass directly to generate_map(route=...).
 
-    Returns the route as an ordered list of coordinates, plus the resolved from/to locations.
-    Pass the result directly to generate_map's `route` parameter to overlay it on a map image.
-    Use from/to as `markers` in generate_map to place pins at the start and end points.
-
-    Typical flow:
-    1. route = compute_route(from_location={"label": "A"}, to_location={"label": "B"})
-    2. generate_map(route=route, markers=[route["from"], route["to"]], ...)
+    Example: compute_route(from_location={"label": "Tokyo Station"}, to_location={"label": "Tokyo Tower"})
     """
-    if mode not in ("walking", "driving"):
-        raise ValueError("mode must be 'walking' or 'driving'")
-
     body = {
         "from": from_location.model_dump(exclude_none=True),
         "to": to_location.model_dump(exclude_none=True),
@@ -279,109 +244,47 @@ async def compute_route(
 @mcp.tool()
 async def generate_map(
     place: Annotated[
-        str | None,
-        "Place name to center the map on (e.g. 'Shibuya Station', '東京駅', 'Eiffel Tower'). "
-        "A red pin is placed at the resolved location. Use this OR lat/lng, not both. "
-        "Omit when using markers-only mode.",
+        str | None, Field(description="Place name to center the map on. Use this OR lat/lng, not both.")
     ] = None,
-    lat: Annotated[
-        float | None,
-        "Latitude of the map center. Must be combined with lng. "
-        "ONLY set this when you have a precise, verified coordinate value — never guess or estimate. "
-        "If the location is known only by name, use `place` instead and let the server geocode it. "
-        "Omit when using markers-only mode.",
-    ] = None,
-    lng: Annotated[
-        float | None,
-        "Longitude of the map center. Must be combined with lat. "
-        "ONLY set this when you have a precise, verified coordinate value — never guess or estimate. "
-        "If the location is known only by name, use `place` instead and let the server geocode it. "
-        "Omit when using markers-only mode.",
-    ] = None,
-    markers: Annotated[
-        list[Marker] | None,
-        "List of locations to pin on the map as blue markers. "
-        "Each item needs only a 'label' (geocoded automatically); explicit 'location' {lat, lng} is optional. "
-        "When markers are provided without place/lat/lng, the server derives the map center from their centroid "
-        "and sets radius automatically. "
-        "Example for two stations: [{\"label\": \"東京駅\"}, {\"label\": \"新宿駅\"}]",
-    ] = None,
-    name: Annotated[
-        str | None,
-        "Map name stored in the data file. Used as the default download filename. "
-        "Omit to leave unnamed.",
-    ] = None,
+    lat: Annotated[float | None, Field(description="Latitude of the map center. Must be combined with lng.")] = None,
+    lng: Annotated[float | None, Field(description="Longitude of the map center. Must be combined with lat.")] = None,
+    markers: Annotated[list[Marker] | None, Field(description="Locations to pin on the map.")] = None,
+    name: Annotated[str | None, Field(description="Map name stored in the data file.")] = None,
     radius: Annotated[
         int | None,
-        "Circular coverage radius in meters (max 2500). "
-        "Mutually exclusive with size_ew/size_ns. "
-        "ONLY set this when the user has explicitly requested a specific coverage range. "
-        "If the user has not specified a range, omit it — the server applies a sensible default (500 m).",
+        Field(description="Circular radius in meters (default 500, max 2500). Exclusive with size_ew/size_ns."),
     ] = None,
     size_ew: Annotated[
         float | None,
-        "East-west width of a rectangular coverage area in meters. "
-        "Must be combined with size_ns. Mutually exclusive with radius. "
-        "ONLY set this when the user has explicitly requested a rectangular area of specific dimensions. "
-        "Do not infer dimensions — omit and let the server use its default if the user has not specified.",
+        Field(description="Rectangular area width (east-west), meters. Must pair with size_ns; exclusive with radius."),
     ] = None,
     size_ns: Annotated[
         float | None,
-        "North-south height of a rectangular coverage area in meters. "
-        "Must be combined with size_ew. Mutually exclusive with radius. "
-        "ONLY set this when the user has explicitly requested a rectangular area of specific dimensions.",
+        Field(description="Rectangular area height (north-south), meters. Must pair with size_ew."),
     ] = None,
     layers: Annotated[
         Literal["default", "road_and_railway", "only_driving_road", "fully_detailed"] | None,
-        "Preset combination of map layers. 'default': roads + POI icons. "
-        "'only_driving_road': car-accessible roads only, nothing else. "
-        "'road_and_railway': roads + railway lines, no POI. "
-        "'fully_detailed': roads + railway + waterline + greenarea + POI "
-        "(waterline/greenarea only apply within Japan; ignored elsewhere). "
-        "Omit for 'default'.",
+        Field(description="Layer preset — see server instructions for what each preset includes. Omit for 'default'."),
     ] = None,
     route: Annotated[
         RouteInput | None,
-        "Route to overlay on the map. Pass the full response from compute_route() directly — "
-        "the server uses coords and (optionally) color from it. "
-        "To customise the line color, set/override the 'color' field (e.g. '#FF4500'). "
-        "Omit to generate a map without a route overlay.",
-    ] = None,
-    config: Annotated[
-        MapConfig | None,
-        "Overrides for automatic layer-visibility defaults. Omit any field to keep the default. "
-        "Example to turn off buildings: {\"withBuilding\": false}.",
+        Field(description="Route to overlay — pass compute_route()'s result directly. Add/override 'color' (hex) to customize."),
     ] = None,
     color_set: Annotated[
         str | None,
-        "Color theme for the map. Only set when the user explicitly requests one. "
-        "Baked into the stored map data so redownload_map uses the same theme by default. "
-        "Can be overridden per-download by passing color_set to redownload_map. "
-        "Available themes: white, darkBlue, darkGreen, popArt, lightBlue, lightGreen, beige, magenta, gray, black, brawn.",
+        Field(description="Color theme name — see server instructions for the list. Only set when explicitly requested."),
     ] = None,
-    format: Annotated[
-        str,
-        "Output file format: 'png' (default, raster image) or 'svg' (vector, scalable to any size).",
-    ] = "png",
-    canvas_width: Annotated[int | None, "Canvas width in pixels. Omit to use server default (1000)."] = None,
-    canvas_height: Annotated[int | None, "Canvas height in pixels. Omit to use server default (600)."] = None,
+    format: Annotated[Literal["png", "svg"], Field(description="'png' (default) or 'svg'.")] = "png",
+    canvas_width: Annotated[int | None, Field(description="Canvas width in pixels (default 1000).")] = None,
+    canvas_height: Annotated[int | None, Field(description="Canvas height in pixels (default 600).")] = None,
     ctx: Context = None,
 ) -> list:
-    """Generate a styled map image for a given location and save it to Downloads.
+    """Generate a styled map image and save it to Downloads.
 
-    Coverage shape:
-    - Default (no radius, no size): circular 500 m radius
-    - radius=N: circular, N meters
-    - size_ew + size_ns: rectangular bounding box
+    May return a pending dataKey instead of the image — see server instructions for the
+    check_map_status follow-up flow.
 
-    After generation the dataKey is returned in the text result.
-    Use redownload_map(dataKey=...) to get the same map in a different color or format
-    without waiting for regeneration.
-
-    If generation is still running after a short wait, this returns a dataKey and asks
-    you to call check_map_status(dataKey=...) after a delay instead of returning the
-    image directly — do not call generate_map again for the same location in that case,
-    it would just start a redundant duplicate job.
+    Example: generate_map(place="Tokyo Station")
     """
     has_center = place or (lat is not None and lng is not None)
     has_route_coords = route is not None and route.coords is not None and len(route.coords) >= 2
@@ -411,8 +314,6 @@ async def generate_map(
         body["size"] = {"ew": size_ew, "ns": size_ns}
     if route is not None:
         body["route"] = route.model_dump(by_alias=True, exclude_none=True)
-    if config is not None:
-        body["config"] = config.model_dump(exclude_none=True)
 
     async with httpx.AsyncClient() as client:
         # 1. Enqueue
@@ -463,26 +364,24 @@ async def generate_map(
 async def check_map_status(
     data_key: Annotated[
         str,
-        "The dataKey returned by a generate_map call that reported it was still in progress.",
+        Field(description="The dataKey returned by a generate_map call that reported it was still in progress."),
     ],
     color_set: Annotated[
         str | None,
-        "Color theme, matching what generate_map was called with, if any.",
+        Field(description="Color theme, matching what generate_map was called with, if any."),
     ] = None,
-    format: Annotated[
-        str,
-        "'png' or 'svg', matching what generate_map was called with.",
-    ] = "png",
-    canvas_width: Annotated[int | None, "Canvas width, matching what generate_map was called with, if any."] = None,
-    canvas_height: Annotated[int | None, "Canvas height, matching what generate_map was called with, if any."] = None,
+    format: Annotated[Literal["png", "svg"], Field(description="Matching what generate_map was called with.")] = "png",
+    canvas_width: Annotated[
+        int | None, Field(description="Canvas width, matching what generate_map was called with, if any.")
+    ] = None,
+    canvas_height: Annotated[
+        int | None, Field(description="Canvas height, matching what generate_map was called with, if any.")
+    ] = None,
     ctx: Context = None,
 ) -> list:
-    """Check whether a still-in-progress generate_map job has finished, and download it if so.
+    """Poll a pending generate_map job and download it once ready. Wait ~20-30s between calls.
 
-    Only call this after generate_map reports it is still processing and gives you a
-    dataKey to check. Wait about 20-30 seconds between calls to this tool — do not call
-    it in a tight loop, and do not call generate_map again for the same location while a
-    job with this dataKey is still pending; that just starts a redundant duplicate job.
+    Example: check_map_status(data_key="20260618aBcDeFgHiJ")
     """
     async with httpx.AsyncClient() as client:
         # 連打されても機械的に間隔が空くようにする最低限のスロットル
@@ -511,39 +410,22 @@ async def check_map_status(
 
 @mcp.tool()
 async def redownload_map(
-    data_key: Annotated[
-        str,
-        "The dataKey returned by a previous generate_map call (e.g. '20260618aBcDeFgHiJ'). "
-        "The map data is reused — no regeneration occurs.",
-    ],
+    data_key: Annotated[str, Field(description="The dataKey returned by a previous generate_map call.")],
     color_set: Annotated[
         str | None,
-        "Color theme for the map. Only set when the user explicitly requests one. "
-        "Available: white, darkBlue, darkGreen, popArt, lightBlue, lightGreen, beige, magenta, gray, black, brawn.",
+        Field(description="Color theme — see server instructions for the list. Only set when explicitly requested."),
     ] = None,
-    format: Annotated[
-        str,
-        "'png' (raster) or 'svg' (vector, infinitely scalable).",
-    ] = "png",
-    canvas_width: Annotated[int | None, "Canvas width in pixels. Omit to use server default (1000)."] = None,
-    canvas_height: Annotated[int | None, "Canvas height in pixels. Omit to use server default (600)."] = None,
-    edge_weight: Annotated[
-        int | None,
-        "Road and line width adjustment. Positive values thicken lines, negative values thin them. "
-        "Default 0 (no adjustment).",
-    ] = None,
+    format: Annotated[Literal["png", "svg"], Field(description="'png' (raster) or 'svg' (vector).")] = "png",
+    canvas_width: Annotated[int | None, Field(description="Canvas width in pixels (default 1000).")] = None,
+    canvas_height: Annotated[int | None, Field(description="Canvas height in pixels (default 600).")] = None,
 ) -> list:
-    """Re-download a previously generated map with a different color theme or format.
+    """Re-download a prior map in a different color theme, format, or size — instant, no regeneration.
 
-    Uses the dataKey from a prior generate_map call. The map data is NOT regenerated,
-    so this is instant. Use this when the user wants to:
-    - Try a different color theme (e.g. 'black' for dark mode, 'lightBlue', 'popArt')
-    - Get an SVG version of a map already generated as PNG
-    - Get a larger or smaller canvas size
+    Example: redownload_map(data_key="20260618aBcDeFgHiJ", color_set="black")
     """
     async with httpx.AsyncClient() as client:
         image_bytes = await _download(client, data_key, format, color_set,
-                                      canvas_width, canvas_height, edge_weight)
+                                      canvas_width, canvas_height)
 
     out_path = _make_filename(data_key, format)
     out_path.write_bytes(image_bytes)

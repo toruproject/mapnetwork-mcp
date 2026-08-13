@@ -3,6 +3,8 @@ name = "mapnetwork-mcp"
 version = "1.2.3"
 description = "MCP server — generate styled map images via mapnetwork.app"
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.11"
 dependencies = [
     # mcp 2.0.0はmcp.server.fastmcp(Context/FastMCP/Image)を含む破壊的変更が入っており、
