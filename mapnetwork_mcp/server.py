@@ -22,17 +22,6 @@ INITIAL_WAIT_SEC = 40.0
 # check_map_statusをモデルが連打しても機械的に間隔が空くようにする最低待機時間
 CHECK_THROTTLE_SEC = 5.0
 
-# layersは自由な多値配列にすると、モデルが「roadはhighway/driving/walkingの上位互換」
-# といった内部の組み合わせルールを知らないまま組み合わせを選んでしまう。
-# 人間側で意味のある4パターンだけに絞り込み、モデルにはこのプリセット名だけを選ばせる。
-_LAYER_PRESETS: dict[str, list[str]] = {
-    "default": ["road", "poi"],
-    "road_and_railway": ["road", "railway", "poi"],
-    "only_driving_road": ["driving"],
-    "fully_detailed": ["road", "railway", "poi", "waterline", "greenarea"],
-}
-
-
 class Location(BaseModel):
     lat: float = Field(description="Latitude.")
     lng: float = Field(description="Longitude.")
@@ -70,19 +59,22 @@ mcp = FastMCP(
         "You have access to MapNetwork, which generates styled map images (PNG or SVG) "
         "for any location on Earth.\n\n"
         "## Key capabilities\n"
-        "- **Single location**: pass `place` (geocoded server-side) or `lat`/`lng` as the map center\n"
+        "- **Single location**: pass `place` (geocoded server-side). If you already know the "
+        "coordinates, pair it with `location` ({lat, lng}) to skip geocoding — same pattern as a "
+        "marker's `label`+`location`. `location` alone (without `place`) also works, but places no "
+        "labeled pin. `location` is not necessarily the final map center — see below.\n"
         "- **Multiple locations**: pass `markers` — a list of places to pin on the map. "
-        "Each marker needs only a `label` (geocoded automatically); explicit `lat`/`lng` is optional. "
-        "When `markers` are given without a `place`/`lat`/`lng` center, the server derives the center "
-        "from the centroid of the markers and sets the radius automatically (1.2× farthest marker distance). "
+        "Each marker needs only a `label` (geocoded automatically); explicit `location` is optional. "
         "Use this whenever the user asks to show multiple places on a single map.\n"
-        "- **Circular area**: specify `radius` in meters (default 500, max 2500) around the center\n"
-        "- **Rectangular area**: specify `size_ew` (east-west) and `size_ns` (north-south) in meters "
-        "instead of radius — useful when the area of interest is not square\n"
-        "- **Layers**: choose a preset via `layers` — 'default' (roads + POI), "
-        "'only_driving_road' (car-accessible roads only), 'road_and_railway' (roads + railway, no POI), "
-        "or 'fully_detailed' (roads + railway + waterline + greenarea + POI; waterline/greenarea only "
-        "apply within Japan). Omit for 'default'.\n"
+        "- **Map shape and size are fully automatic**: with a single input location (`place`/`location`, "
+        "or one marker), the server centers a circular map on it (500 m radius by default). "
+        "With multiple input locations (`markers`, or a `route`), the server fits a rectangle (or square) "
+        "around all of them, and the center becomes the midpoint of that rectangle — not any single "
+        "input coordinate. There is no way to manually set the radius or rectangle size.\n"
+        "- **Layers are fully automatic**: roads and POI icons are always included. The server picks "
+        "walkable roads vs. car-only roads based on the route or the map's east-west extent, and adds "
+        "railway/waterline/aerialway layers automatically when POIs like stations, harbours, beaches, or "
+        "ropeways are detected nearby (Japan only). There is no way to manually choose layers.\n"
         "- **Color themes** via `color_set`: "
         "white (clean, default), darkBlue (navy bg), darkGreen (dark teal bg), "
         "popArt (blue bg, bold contrast), lightBlue (pale blue bg), lightGreen (pale green bg), "
@@ -117,10 +109,8 @@ mcp = FastMCP(
         "Mention this when relevant, but do not ask the user unprompted. "
         "Only set color_set when the user explicitly requests a theme.\n\n"
         "## Parameter discipline\n"
-        "- **lat/lng**: Never guess or estimate coordinates from training data. "
-        "If the location is known only by name, use `place` and let the server geocode it.\n"
-        "- **radius / size_ew / size_ns**: Do not set these unless the user has explicitly asked for "
-        "a specific map range or shape. Omit them to let the server apply its default (500 m radius)."
+        "- **location**: Never guess or estimate coordinates from training data. "
+        "If the location is known only by name, use `place` and let the server geocode it."
     ),
 )
 
@@ -244,28 +234,14 @@ async def compute_route(
 @mcp.tool()
 async def generate_map(
     place: Annotated[
-        str | None, Field(description="Place name to center the map on. Use this OR lat/lng, not both.")
+        str | None, Field(description="Place name to center the map on (geocoded server-side unless 'location' is also given).")
     ] = None,
-    lat: Annotated[float | None, Field(description="Latitude of the map center. Must be combined with lng.")] = None,
-    lng: Annotated[float | None, Field(description="Longitude of the map center. Must be combined with lat.")] = None,
+    location: Annotated[
+        Location | None,
+        Field(description="Explicit coordinates for 'place'. If given, geocoding of 'place' is skipped. Not necessarily the map's final center — see server instructions."),
+    ] = None,
     markers: Annotated[list[Marker] | None, Field(description="Locations to pin on the map.")] = None,
     name: Annotated[str | None, Field(description="Map name stored in the data file.")] = None,
-    radius: Annotated[
-        int | None,
-        Field(description="Circular radius in meters (default 500, max 2500). Exclusive with size_ew/size_ns."),
-    ] = None,
-    size_ew: Annotated[
-        float | None,
-        Field(description="Rectangular area width (east-west), meters. Must pair with size_ns; exclusive with radius."),
-    ] = None,
-    size_ns: Annotated[
-        float | None,
-        Field(description="Rectangular area height (north-south), meters. Must pair with size_ew."),
-    ] = None,
-    layers: Annotated[
-        Literal["default", "road_and_railway", "only_driving_road", "fully_detailed"] | None,
-        Field(description="Layer preset — see server instructions for what each preset includes. Omit for 'default'."),
-    ] = None,
     route: Annotated[
         RouteInput | None,
         Field(description="Route to overlay — pass compute_route()'s result directly. Add/override 'color' (hex) to customize."),
@@ -286,32 +262,22 @@ async def generate_map(
 
     Example: generate_map(place="Tokyo Station")
     """
-    has_center = place or (lat is not None and lng is not None)
+    has_center = place or location is not None
     has_route_coords = route is not None and route.coords is not None and len(route.coords) >= 2
     if not has_center and not markers and not has_route_coords:
-        raise ValueError("Specify 'place', both 'lat'+'lng', 'markers', or a 'route' with coords.")
-    if radius is not None and (size_ew is not None or size_ns is not None):
-        raise ValueError("Specify either 'radius' or 'size_ew'+'size_ns', not both.")
-    if (size_ew is None) != (size_ns is None):
-        raise ValueError("'size_ew' and 'size_ns' must be specified together.")
+        raise ValueError("Specify 'place', 'location', 'markers', or a 'route' with coords.")
 
     body: dict = {}
-    if layers is not None:
-        body["layers"] = _LAYER_PRESETS[layers]
     if place:
         body["place"] = place
-    elif lat is not None and lng is not None:
-        body["center"] = {"lat": lat, "lng": lng}
+    if location is not None:
+        body["center"] = location.model_dump()
     if markers is not None:
         body["markers"] = [m.model_dump(exclude_none=True) for m in markers]
     if name is not None:
         body["name"] = name
     if color_set is not None:
         body["colorSet"] = color_set
-    if radius is not None:
-        body["radius"] = radius
-    elif size_ew is not None:
-        body["size"] = {"ew": size_ew, "ns": size_ns}
     if route is not None:
         body["route"] = route.model_dump(by_alias=True, exclude_none=True)
 
@@ -336,7 +302,7 @@ async def generate_map(
         if status == "failed":
             raise RuntimeError(
                 f"Map generation failed (dataKey={data_key}). "
-                "Try a different location or smaller radius."
+                "Try a different location."
             )
         if status == "pending":
             return _still_in_progress_result(data_key)
@@ -347,8 +313,8 @@ async def generate_map(
 
     if place:
         label = place
-    elif lat is not None and lng is not None:
-        label = f"{lat}_{lng}"
+    elif location is not None:
+        label = f"{location.lat}_{location.lng}"
     elif markers:
         label = "_".join(m.label or "" for m in markers)[:40]
     else:
@@ -391,7 +357,7 @@ async def check_map_status(
         if status == "failed":
             raise RuntimeError(
                 f"Map generation failed (dataKey={data_key}). "
-                "Try a different location or smaller radius."
+                "Try a different location."
             )
         if status != "ready":
             if ctx is not None:
