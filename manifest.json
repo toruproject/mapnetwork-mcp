@@ -2,7 +2,7 @@
   "manifest_version": "0.4",
   "name": "mapnetwork-mcp",
   "display_name": "MapNetwork",
-  "version": "3.0.0",
+  "version": "4.0.0",
   "description": "Generate styled PNG/SVG map images of any location with 11 customizable color themes.",
   "long_description": "MCP server for MapNetwork — generate styled map images (PNG / SVG) for any location on Earth, directly from Claude.\n\n- Generate maps from a place name, coordinates, or a list of markers\n- 11 color themes (white, darkBlue, darkGreen, popArt, lightBlue, lightGreen, beige, magenta, gray, black, brawn)\n- Overlay walking / driving routes on the map\n- PNG or SVG output, saved to your Downloads folder\n- Re-download a previously generated map in a different theme or format without regenerating\n- Open any generated map in the MapNetwork web editor for manual customization",
   "author": {
@@ -25,11 +25,23 @@
   "tools": [
     {
       "name": "generate_map",
-      "description": "Generate a styled map image for a location and save it to Downloads"
+      "description": "Generate a styled map image centered on a single place and save it to Downloads"
     },
     {
-      "name": "compute_route",
-      "description": "Compute a walking or driving route between two locations"
+      "name": "generate_markers_map",
+      "description": "Generate a map with multiple pinned locations"
+    },
+    {
+      "name": "generate_route_map",
+      "description": "Compute a walking or driving route between two places and generate a map with it overlaid"
+    },
+    {
+      "name": "generate_hyperlink_map",
+      "description": "Generate a map with pinned locations that are clickable links to their official websites"
+    },
+    {
+      "name": "check_map_status",
+      "description": "Poll a pending map generation job and download it once ready"
     },
     {
       "name": "redownload_map",

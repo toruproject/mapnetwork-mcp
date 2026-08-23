@@ -1,48 +1,16 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "MapNetwork MCP - 入力JSON仕様",
-  "description": "mapnetwork_mcp/server.py で定義されている4つのMCPツールの入力パラメータ仕様。各属性の型・デフォルト値・設定可能値（enum）・制約を示す。",
+  "description": "mapnetwork_mcp/server.py で定義されている6つのMCPツールの入力パラメータ仕様。各属性の型・デフォルト値・設定可能値（enum）・制約を示す。",
   "definitions": {
-    "Location": {
-      "type": "object",
-      "description": "明示的な緯度経度座標",
-      "properties": {
-        "lat": { "type": "number", "description": "緯度" },
-        "lng": { "type": "number", "description": "経度" }
-      },
-      "required": ["lat", "lng"]
-    },
     "Marker": {
       "type": "object",
-      "description": "地図上にピン留めする地点",
+      "description": "generate_markers_map/generate_hyperlink_map共通。地図上にピン留めする地点。labelは必須、linkは任意で公式サイトURLを付けられる。generate_markers_mapはlink無しのマーカーが混在してもよい（むしろ通常はこちら）。generate_hyperlink_mapは、markers全体のうち少なくとも1件がlinkを持つことをツール側で検証する（ツールごとに別モデルは存在しない）",
       "properties": {
-        "label": { "type": ["string", "null"], "default": null, "description": "地名（ジオコーディング・表示用）" },
-        "location": { "oneOf": [{ "$ref": "#/definitions/Location" }, { "type": "null" }], "default": null, "description": "明示的な座標。指定するとlabelのジオコーディングは省略される" }
-      }
-    },
-    "RouteEndpoint": {
-      "type": "object",
-      "description": "ルートの始点/終点",
-      "properties": {
-        "label": { "type": ["string", "null"], "default": null, "description": "地名（ジオコーディング・表示用）" },
-        "location": { "oneOf": [{ "$ref": "#/definitions/Location" }, { "type": "null" }], "default": null, "description": "明示的な座標" }
-      }
-    },
-    "RouteInput": {
-      "type": "object",
-      "description": "generate_mapのrouteパラメータ。compute_routeの戻り値をそのまま渡せる",
-      "properties": {
-        "coords": {
-          "type": ["array", "null"],
-          "default": null,
-          "description": "ルート上の[lat, lng]座標列",
-          "items": { "type": "array", "items": { "type": "number" }, "minItems": 2, "maxItems": 2 }
-        },
-        "mode": { "oneOf": [{ "type": "string", "enum": ["walking", "driving"] }, { "type": "null" }], "default": null },
-        "from": { "oneOf": [{ "$ref": "#/definitions/RouteEndpoint" }, { "type": "null" }], "default": null, "description": "ルート始点" },
-        "to": { "oneOf": [{ "$ref": "#/definitions/RouteEndpoint" }, { "type": "null" }], "default": null, "description": "ルート終点" },
-        "color": { "type": ["string", "null"], "default": null, "description": "ルート線の色（CSS16進カラー、例: '#FF4500'）" }
-      }
+        "label": { "type": "string", "description": "地名（ジオコーディング・表示用）" },
+        "link": { "type": ["string", "null"], "default": null, "description": "その地点の公式サイトURL（既知の場合のみ設定）" }
+      },
+      "required": ["label"]
     },
     "ColorSet": {
       "type": "string",
@@ -58,100 +26,100 @@
   },
   "tools": {
     "generate_map": {
-      "description": "指定した場所のスタイル付き地図画像を生成し、Downloadsフォルダに保存する",
+      "description": "単一の地名を中心にしたスタイル付き地図画像を生成し、Downloadsフォルダに保存する。地図サイズ・取得レイヤーは座標から自動決定される。常にデフォルトのカラーテーマ・PNG形式でダウンロードする（別の見た目が欲しければredownload_mapで取り直す）",
       "type": "object",
       "properties": {
-        "place": { "type": ["string", "null"], "default": null, "description": "地図に表示する地名。locationが未指定ならサーバー側でジオコーディングする" },
-        "location": {
-          "oneOf": [{ "$ref": "#/definitions/Location" }, { "type": "null" }],
-          "default": null,
-          "description": "placeの明示的な座標。指定するとplaceのジオコーディングは省略される(Markerのlabel+locationと同じパターン)。locationのみの指定も可能(ただしその場合ピンは表示されない)。地図の最終的な中心(center)と必ずしも一致しない点に注意(markers/routeで複数座標がある場合、centerはそれらを包含する範囲の中点になる)"
-        },
-        "markers": {
-          "type": ["array", "null"],
-          "default": null,
-          "description": "地図上にピン留めする地点リスト",
-          "items": { "$ref": "#/definitions/Marker" }
-        },
-        "name": { "type": ["string", "null"], "default": null, "description": "データファイルに保存する地図名" },
-        "route": {
-          "oneOf": [{ "$ref": "#/definitions/RouteInput" }, { "type": "null" }],
-          "default": null,
-          "description": "地図に重ねるルート。compute_routeの戻り値をそのまま渡せる"
-        },
-        "color_set": {
-          "oneOf": [{ "$ref": "#/definitions/ColorSet" }, { "type": "null" }],
-          "default": null,
-          "description": "カラーテーマ。ユーザーが明示的に要求した場合のみ設定"
-        },
-        "format": { "allOf": [{ "$ref": "#/definitions/Format" }], "description": "出力形式" },
-        "canvas_width": { "type": ["integer", "null"], "default": null, "description": "キャンバス幅（ピクセル）。未指定時サーバー側デフォルト1000" },
-        "canvas_height": { "type": ["integer", "null"], "default": null, "description": "キャンバス高さ（ピクセル）。未指定時サーバー側デフォルト600" }
+        "place": { "type": "string", "description": "地図の中心とする地名（サーバー側でジオコーディング）", "required": true }
       },
-      "constraints": [
-        "place / location / markers / route.coords(2点以上) のいずれか1つ以上を指定する必要がある",
-        "地図の形状・サイズ（円形/矩形）、および取得レイヤー（道路・POI・鉄道・水域・索道）はサーバー側で入力座標から自動決定され、手動指定はできない。入力座標が1点のみなら円形、2点以上ならそれらを包含する矩形（または正方形）になる。具体的な半径・サイズの初期値や上限はサーバー側の実装詳細であり、将来変更されうる"
-      ],
+      "required": ["place"],
+      "constraints": ["configDict.nameにはサーバー側がplaceの値をそのまま設定する（このツールにname引数はない）"],
       "example": { "place": "Tokyo Station" }
     },
-    "compute_route": {
-      "description": "2地点間の徒歩/車ルートを計算する。戻り値はgenerate_mapのrouteパラメータにそのまま渡せる",
+    "generate_markers_map": {
+      "description": "複数の地点をピン留めした地図画像を生成する。各地点は任意でlinkを持てる（generate_hyperlink_mapと違い必須ではない、一部/全部/どれもlinkを持たなくてもよい）。常にデフォルトのカラーテーマ・PNG形式でダウンロードする",
       "type": "object",
       "properties": {
-        "from_location": {
-          "allOf": [{ "$ref": "#/definitions/RouteEndpoint" }],
-          "description": "ルート始点。'location'で座標指定、または'label'でジオコーディング",
-          "required": true
+        "markers": {
+          "type": "array",
+          "description": "地図上にピン留めする地点リスト（1件以上必須）。linkは任意",
+          "items": { "$ref": "#/definitions/Marker" },
+          "minItems": 1
         },
-        "to_location": {
-          "allOf": [{ "$ref": "#/definitions/RouteEndpoint" }],
-          "description": "ルート終点。from_locationと同じ形式",
-          "required": true
-        },
+        "place": { "type": ["string", "null"], "default": null, "description": "地図の中心とする地名。未指定ならmarkersの座標群から自動計算される" }
+      },
+      "required": ["markers"],
+      "constraints": [
+        "markersは1件以上必須（link有無は問わない。1件もlinkを持たないのが通常のケース）",
+        "markersのいずれかがlinkを持つ場合、成功レスポンスは編集用リンクの代わりに閲覧専用（lock）のhyperlink Mapリンクを返す（generate_hyperlink_mapを呼んだ場合と同じ挙動。判定はどのツールを呼んだかではなく実データによる）",
+        "configDict.nameにはサーバー側がplace（未指定ならmarkersのlabelを連結した文字列）を自動設定する"
+      ],
+      "example": { "markers": [{ "label": "Tokyo Tower" }, { "label": "Zojoji Temple" }] }
+    },
+    "generate_route_map": {
+      "description": "2地点間の徒歩/車ルートを計算し、それを重ねた地図画像を1回の呼び出しで生成する。ルート探索と地図生成が別ツールに分かれていた旧設計（compute_route→generate_route_mapの2段階）は、MCPホスト側にとって難易度が高すぎたため統合された。ルートの両端点は地図上に自動でピン留めされる。常にデフォルトのカラーテーマ・PNG形式でダウンロードする",
+      "type": "object",
+      "properties": {
+        "from": { "type": "string", "description": "ルート始点の地名（サーバー側でジオコーディング）", "required": true },
+        "to": { "type": "string", "description": "ルート終点の地名（サーバー側でジオコーディング）", "required": true },
         "mode": {
           "allOf": [{ "type": "string", "enum": ["walking", "driving"] }],
           "default": "walking",
           "description": "移動手段"
-        }
+        },
+        "place": { "type": ["string", "null"], "default": null, "description": "地図の中心とする地名。未指定ならルートの座標群から自動計算される" }
       },
-      "required": ["from_location", "to_location"],
-      "example": {
-        "from_location": { "label": "Tokyo Station" },
-        "to_location": { "label": "Tokyo Tower" }
-      }
+      "required": ["from", "to"],
+      "constraints": [
+        "from/toは地名の文字列のみ。座標を自分で計算・推測して渡してはならない（サーバー側でジオコーディング・ルート探索の両方を行う）",
+        "ルートの両端点は自動でピン留めされるため、別途generate_markers_mapを呼ぶ必要はない",
+        "ルート探索はバックエンドのワーカー内(地図生成と同じジョブ)で、地図生成用に取得した道路データをそのまま再利用して行われる（別エンドポイントでの事前ルート探索は廃止済み、道路データの二重取得を避けるため）。そのため「ルートが見つからない」等の失敗は、呼び出し時点では分からず、地図生成ジョブ自体の失敗（dataKeyのstatusがfailed）として遅れて判明する",
+        "configDict.nameにはサーバー側がplace（未指定なら'route'固定文字列）を自動設定する"
+      ],
+      "example": { "from": "Tokyo Station", "to": "Tokyo Tower", "mode": "walking" }
     },
-    "check_map_status": {
-      "description": "generate_mapが未完了（pending）を返した場合のジョブをポーリングし、完了していればダウンロードする",
+    "generate_hyperlink_map": {
+      "description": "generate_markers_mapと同一のツール（markers/placeの形も同じ、Marker定義も共通）だが、markersのうち少なくとも1件がlinkを持つことを追加で要求する。全markerがlink無しだとエラーになる。linkを持つ地点があると、生成結果は編集用リンクの代わりに閲覧専用（lock）のhyperlink Mapリンクを返す。常にデフォルトのカラーテーマ・PNG形式でダウンロードする",
       "type": "object",
       "properties": {
-        "data_key": { "type": "string", "description": "generate_mapが返したdataKey", "required": true },
-        "color_set": {
-          "oneOf": [{ "$ref": "#/definitions/ColorSet" }, { "type": "null" }],
-          "default": null,
-          "description": "generate_map呼び出し時と同じ値を指定"
+        "markers": {
+          "type": "array",
+          "description": "地図上にピン留めする地点リスト（1件以上必須、かつ少なくとも1件はlinkを持つ必要がある）",
+          "items": { "$ref": "#/definitions/Marker" },
+          "minItems": 1
         },
-        "format": { "allOf": [{ "$ref": "#/definitions/Format" }], "description": "generate_map呼び出し時と同じ値を指定" },
-        "canvas_width": { "type": ["integer", "null"], "default": null, "description": "generate_map呼び出し時と同じ値を指定" },
-        "canvas_height": { "type": ["integer", "null"], "default": null, "description": "generate_map呼び出し時と同じ値を指定" }
+        "place": { "type": ["string", "null"], "default": null, "description": "地図の中心とする地名。未指定ならmarkersの座標群から自動計算される" }
+      },
+      "required": ["markers"],
+      "constraints": [
+        "markersは1件以上必須",
+        "markersのうち少なくとも1件はlinkを持つ必要がある（ツール側でバリデーション、Marker定義自体はlinkを任意としている）。持たない場合はエラーになり、generate_markers_mapの使用を促すメッセージが返る",
+        "configDict.nameにはサーバー側がplace（未指定ならmarkersのlabelを連結した文字列）を自動設定する"
+      ],
+      "example": { "markers": [{ "label": "Zojoji Temple" }, { "label": "Tokyo Tower", "link": "https://www.tokyotower.co.jp/" }] }
+    },
+    "check_map_status": {
+      "description": "generate_*ツールが未完了（pending）を返した場合のジョブをポーリングし、完了していればデフォルトのカラーテーマ・PNG形式でダウンロードする",
+      "type": "object",
+      "properties": {
+        "data_key": { "type": "string", "description": "generate_*ツールが返したdataKey", "required": true }
       },
       "required": ["data_key"],
       "example": { "data_key": "20260618aBcDeFgHiJ" }
     },
     "redownload_map": {
-      "description": "生成済みの地図を、再生成せずに別のカラーテーマ/形式/サイズで再ダウンロードする",
+      "description": "生成済みの地図を、再生成せずに別のカラーテーマ/形式で再ダウンロードする",
       "type": "object",
       "properties": {
-        "data_key": { "type": "string", "description": "以前のgenerate_map呼び出しが返したdataKey", "required": true },
+        "data_key": { "type": "string", "description": "以前のgenerate_*ツール呼び出しが返したdataKey", "required": true },
         "color_set": {
           "oneOf": [{ "$ref": "#/definitions/ColorSet" }, { "type": "null" }],
           "default": null,
           "description": "ユーザーが明示的に要求した場合のみ設定"
         },
-        "format": { "allOf": [{ "$ref": "#/definitions/Format" }], "description": "'png'（ラスター）または'svg'（ベクター）" },
-        "canvas_width": { "type": ["integer", "null"], "default": null, "description": "キャンバス幅（ピクセル）。未指定時サーバー側デフォルト1000" },
-        "canvas_height": { "type": ["integer", "null"], "default": null, "description": "キャンバス高さ（ピクセル）。未指定時サーバー側デフォルト600" }
+        "format": { "allOf": [{ "$ref": "#/definitions/Format" }], "description": "'png'（ラスター）または'svg'（ベクター）" }
       },
       "required": ["data_key"],
+      "constraints": ["canvas_width/canvas_heightは廃止済み"],
       "example": { "data_key": "20260618aBcDeFgHiJ", "color_set": "black" }
     }
   }

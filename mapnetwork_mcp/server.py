@@ -3,6 +3,9 @@
 import asyncio
 import os
 import re
+import sys
+import threading
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Annotated, Literal
@@ -16,102 +19,75 @@ POLL_INTERVAL_SEC = 10.0
 MAX_WAIT_SEC = 600
 # MCPクライアントによっては、report_progressで進捗通知を送ってもtools/call自体の
 # クライアント側タイムアウトを延長してくれない(60秒固定のクライアントで実測確認済み)。
-# そのため generate_map は内部ポーリングをこの秒数までに打ち切り、まだ終わっていなければ
+# そのため generate_* は内部ポーリングをこの秒数までに打ち切り、まだ終わっていなければ
 # dataKeyを返してcheck_map_statusでの確認をモデルに促す。60秒に対して十分な余裕を残す値にする。
 INITIAL_WAIT_SEC = 40.0
 # check_map_statusをモデルが連打しても機械的に間隔が空くようにする最低待機時間
 CHECK_THROTTLE_SEC = 5.0
 
-class Location(BaseModel):
-    lat: float = Field(description="Latitude.")
-    lng: float = Field(description="Longitude.")
 
+# extra="forbid": 未知のキー(例えばmarkerの'label'と紛れて'place'を書いてしまう等)を
+# Pydanticが黙って無視せずバリデーションエラーとして返す。tools/callがエラーで返れば
+# モデルは次の呼び出しで自己修正できるが、黙って無視されるとその機会が失われる
+# (実運用でmarkersの各要素に存在しない'place'キーが紛れ込む事故が実際に発生し、
+# extra="ignore"がデフォルトのため気づかれずに黙って無視されていたことが判明した)。
 
 class Marker(BaseModel):
-    label: str | None = Field(default=None, description="Place name for geocoding and/or display.")
-    location: Location | None = Field(
+    """generate_markers_map/generate_hyperlink_map共通。labelは必須、linkは任意で公式サイトURLを
+    付けられる。generate_markers_mapはlink無しのマーカーが混在してもよく(むしろ通常はこちら)、
+    generate_hyperlink_mapは少なくとも1つのマーカーがlinkを持つことを要求する(ツール側で検証)。"""
+    model_config = ConfigDict(extra="forbid")
+
+    label: str = Field(description="Place name to geocode and display.")
+    link: str | None = Field(
         default=None,
-        description="Explicit coordinates. If provided, geocoding of 'label' is skipped.",
+        description="Optional: the marker's official website URL, if known. See server instructions.",
     )
-
-
-class RouteEndpoint(BaseModel):
-    label: str | None = Field(default=None, description="Place name for geocoding and/or display.")
-    location: Location | None = Field(default=None, description="Explicit coordinates.")
-
-
-class RouteInput(BaseModel):
-    """generate_mapのrouteパラメータ。compute_routeの戻り値をそのまま渡せる形にする。"""
-    model_config = ConfigDict(populate_by_name=True)
-
-    coords: list[list[float]] | None = Field(
-        default=None, description="Ordered list of [lat, lng] pairs along the route."
-    )
-    mode: Literal["walking", "driving"] | None = Field(default=None, description="'walking' or 'driving'.")
-    from_: RouteEndpoint | None = Field(default=None, alias="from", description="Route start point.")
-    to: RouteEndpoint | None = Field(default=None, description="Route end point.")
-    color: str | None = Field(default=None, description="Optional line color as a CSS hex color (e.g. '#FF4500').")
 
 
 mcp = FastMCP(
     "MapNetwork",
     instructions=(
-        "You have access to MapNetwork, which generates styled map images (PNG or SVG) "
+        "You have access to MapNetwork, which generates styled map images (PNG) "
         "for any location on Earth.\n\n"
-        "## Key capabilities\n"
-        "- **Single location**: pass `place` (geocoded server-side). If you already know the "
-        "coordinates, pair it with `location` ({lat, lng}) to skip geocoding — same pattern as a "
-        "marker's `label`+`location`. `location` alone (without `place`) also works, but places no "
-        "labeled pin. `location` is not necessarily the final map center — see below.\n"
-        "- **Multiple locations**: pass `markers` — a list of places to pin on the map. "
-        "Each marker needs only a `label` (geocoded automatically); explicit `location` is optional. "
-        "Use this whenever the user asks to show multiple places on a single map.\n"
-        "- **Map shape and size are fully automatic**: with a single input location (`place`/`location`, "
-        "or one marker), the server centers a circular map on it with a small default radius. "
-        "With multiple input locations (`markers`, or a `route`), the server fits a rectangle (or square) "
-        "around all of them, and the center becomes the midpoint of that rectangle — not any single "
-        "input coordinate. There is no way to manually set the radius or rectangle size (the exact "
-        "defaults and limits are server-side details that may change).\n"
-        "- **Layers are fully automatic**: roads and POI icons are always included. The server picks "
-        "walkable roads vs. car-only roads based on the route or the map's east-west extent, and adds "
-        "railway/waterline/aerialway layers automatically when POIs like stations, harbours, beaches, or "
-        "ropeways are detected nearby (Japan only). There is no way to manually choose layers.\n"
-        "- **Color themes** via `color_set`: "
-        "white (clean, default), darkBlue (navy bg), darkGreen (dark teal bg), "
-        "popArt (blue bg, bold contrast), lightBlue (pale blue bg), lightGreen (pale green bg), "
-        "beige (warm peach bg), magenta (hot-pink bg), gray (monochrome), "
-        "black (dark mode), brawn (dark brown/earthy bg)\n"
-        "- **SVG output**: request `format='svg'` for a vector file instead of PNG\n\n"
-        "## Route overlay\n"
-        "To show a walking or driving route on a map:\n"
-        "1. Call `compute_route` with `from_location` and `to_location` (place name or coords)\n"
-        "2. Call `generate_map` with `route=<result>` and `markers=[result['from'], result['to']]`\n"
-        "The route is drawn on top of all other layers. "
-        "Add `'color': '#RRGGBB'` to the route dict to customise the line color.\n\n"
+        "## Key capabilities — pick the tool that matches what you need\n"
+        "- **Single location**: `generate_map(place=...)` — centers a map on one place.\n"
+        "- **Multiple pinned locations**: `generate_markers_map(markers=[{\"label\": ...}, ...])` — "
+        "pins several places on one map. Each marker needs a `label`. Use this whenever the user "
+        "asks to show multiple places on a single map.\n"
+        "- **Walking/driving route**: `generate_route_map(from=..., to=..., mode=...)` — computes a "
+        "route between two places and draws it on the map, with both endpoints pinned automatically. "
+        "`mode` is 'walking' (default) or 'driving'.\n"
+        "- **Hyperlink map**: `generate_hyperlink_map(markers=[{\"label\": ..., \"link\": ...}, ...])` "
+        "— like generate_markers_map, but produces a map where markers are clickable links to their "
+        "official websites. Set `link` on any marker whose official website you already know (e.g. "
+        "from search results or prior knowledge); at least one marker must have `link` set, or the "
+        "call errors. Use this whenever the user wants a map they (or someone else) can click "
+        "through to visit the pinned places' websites.\n"
+        "- Every generate_* call produces a PNG at default size and theme — see 'Important: "
+        "re-download without regenerating' below to view it differently.\n\n"
         "## If generation is still in progress\n"
-        "For busy areas, `generate_map` may return before the map is ready, with a `dataKey` "
+        "For busy areas, any generate_* tool may return before the map is ready, with a `dataKey` "
         "and a message asking you to check back. In that case, wait about 20-30 seconds and "
-        "call `check_map_status(dataKey=...)` — do not call `generate_map` again for the same "
-        "location, that only starts a redundant duplicate job. Repeat `check_map_status` "
+        "call `check_map_status(data_key=...)` — do not call the generate_* tool again for the same "
+        "request, that only starts a redundant duplicate job. Repeat `check_map_status` "
         "(with the same wait between calls) until it returns the image.\n\n"
         "## Important: re-download without regenerating\n"
-        "After generating a map, `generate_map` returns a `dataKey`. "
+        "After generating a map, the tool returns a `dataKey`. "
         "You can call `redownload_map` with that `dataKey` to get the same map in a different "
-        "format (png/svg) or color theme — **no regeneration needed**. "
-        "Use this when the user asks to change only the appearance after already generating the map.\n\n"
-        "## Open in the MapNetwork editor\n"
-        "Any generated map can be opened and edited interactively in the MapNetwork web UI at:\n"
-        "  https://mapnetwork.app/generate?dataKey=<dataKey>\n"
-        "Mention this URL when the user might want to customize markers, colors, or layout manually. "
-        "The map data format is identical to what the UI produces when uploading data.\n\n"
-        "## Color themes\n"
-        "MapNetwork supports 11 color themes via color_set (white, darkBlue, darkGreen, popArt, lightBlue, "
-        "lightGreen, beige, magenta, gray, black, brawn). "
-        "Mention this when relevant, but do not ask the user unprompted. "
-        "Only set color_set when the user explicitly requests a theme.\n\n"
+        "color theme or format (png/svg) — **no regeneration needed**. "
+        "Use this when the user asks to change only the appearance after already generating the map. "
+        "MapNetwork supports 11 color themes (white, darkBlue, darkGreen, popArt, lightBlue, "
+        "lightGreen, beige, magenta, gray, black, brawn).\n\n"
+        "## Sharing the generated map\n"
+        "Every successful result includes a Download link, plus either a 'Hyperlink Map' link "
+        "(read-only, linked markers clickable) or an 'Open in editor' link. "
+        "Mention whichever one you receive.\n\n"
         "## Parameter discipline\n"
-        "- **location**: Never guess or estimate coordinates from training data. "
-        "If the location is known only by name, use `place` and let the server geocode it."
+        "- **place/label**: `place`, a marker's `label`, and route's `from`/`to` must each be a "
+        "place name specific enough for the server to geocode it to a single, unambiguous "
+        "location (e.g. a full venue or station name, not a vague or generic term like "
+        "\"the station\" or \"a nearby cafe\")."
     ),
 )
 
@@ -128,18 +104,29 @@ def _make_filename(label: str, format: str) -> Path:
 
 
 async def _download(client: httpx.AsyncClient, data_key: str, format: str,
-                    color_set: str | None, canvas_width: int | None, canvas_height: int | None) -> bytes:
+                    color_set: str | None) -> bytes:
     params: dict = {"dataKey": data_key, "format": format}
     if color_set is not None:
         params["colorSet"] = color_set
-    if canvas_width is not None:
-        params["canvasWidth"] = canvas_width
-    if canvas_height is not None:
-        params["canvasHeight"] = canvas_height
     resp = await client.get(f"{BASE_URL}/download", params=params, timeout=60)
     if resp.status_code != 200:
         raise RuntimeError(f"Download failed ({resp.status_code}): {resp.text}")
     return resp.content
+
+
+async def _has_any_link(client: httpx.AsyncClient, data_key: str) -> bool:
+    """dataKeyの生成結果(placeDict)にlinkを持つエントリが1つでもあるか判定する。
+    Web UIの共有リンク機能が使うAPIを流用する(MCP生成データも同じSTORE_DIR配下に
+    保存されるため、dataKeyを指定すればWeb UI側からも同じデータが取得できる)。
+    どのツールを呼んだかではなく、実際に生成されたデータで判定する。"""
+    try:
+        resp = await client.get(f"{BASE_URL}/api/upd/download", params={"dataKey": data_key}, timeout=10)
+        if resp.status_code != 200:
+            return False
+        place_dict = resp.json().get("placeDict", {})
+        return any(isinstance(p, dict) and p.get("link") for p in place_dict.values())
+    except Exception:
+        return False
 
 
 async def _poll_with_budget(
@@ -167,16 +154,23 @@ async def _poll_with_budget(
     return "pending"
 
 
-def _build_success_result(image_bytes: bytes, out_path: Path, data_key: str) -> list:
+def _build_success_result(image_bytes: bytes, out_path: Path, data_key: str, has_link: bool) -> list:
     out_path.write_bytes(image_bytes)
+    # linkを持つマーカーが1つでもあれば閲覧専用(lock)リンクを、無ければ編集用リンクを返す。
+    # どのツールを呼んだかではなく実際に生成されたplaceDictの中身で判定している(_has_any_link)。
+    link_line = (
+        f"hyperlink Map: https://mapnetwork.app/generate?dataKey={data_key}&lock=true"
+        if has_link else
+        f"Open in editor: https://mapnetwork.app/generate?dataKey={data_key}"
+    )
     return [
         Image(data=image_bytes, format="png"),
         (
             f"Map saved: {out_path}\n"
             f"dataKey: {data_key}\n\n"
-            f"Open in editor: https://mapnetwork.app/generate?dataKey={data_key}\n\n"
+            f"{link_line}\n\n"
             f"Tip: call redownload_map(data_key='{data_key}', ...) to get this map "
-            f"in a different color_set or format (svg/png) without regenerating."
+            f"in a different color theme or format (svg/png) without regenerating."
         ),
     ]
 
@@ -185,103 +179,16 @@ def _still_in_progress_result(data_key: str) -> list:
     return [(
         f"Map generation is still in progress (dataKey={data_key}). This can take a few "
         "minutes for busy areas. Wait about 20-30 seconds, then call "
-        f"check_map_status(data_key='{data_key}') to check again — pass the same format/"
-        "color_set/canvas_width/canvas_height you used with generate_map, if any. "
-        "Do NOT call generate_map again for the same location — that starts a redundant "
+        f"check_map_status(data_key='{data_key}') to check again. "
+        "Do NOT call the generate_* tool again for the same request — that starts a redundant "
         "duplicate job and wastes time."
     )]
 
 
-# ---------------------------------------------------------------------------
-# Tool: compute_route
-# ---------------------------------------------------------------------------
-
-@mcp.tool()
-async def compute_route(
-    from_location: Annotated[
-        RouteEndpoint, Field(description="Route start. 'location' for coordinates, or 'label' to geocode.")
-    ],
-    to_location: Annotated[RouteEndpoint, Field(description="Route end. Same format as from_location.")],
-    mode: Annotated[Literal["walking", "driving"], Field(description="Default 'walking'.")] = "walking",
-) -> dict:
-    """Compute a route. Returns {coords, from, to} — pass directly to generate_map(route=...).
-
-    Example: compute_route(from_location={"label": "Tokyo Station"}, to_location={"label": "Tokyo Tower"})
-    """
-    body = {
-        "from": from_location.model_dump(exclude_none=True),
-        "to": to_location.model_dump(exclude_none=True),
-        "mode": mode,
-    }
-    async with httpx.AsyncClient() as client:
-        resp = await client.post(f"{BASE_URL}/route", json=body, timeout=180)
-        if resp.status_code == 404:
-            raise RuntimeError("No route found between the two locations.")
-        if resp.status_code == 504:
-            raise RuntimeError("Route computation timed out. Try a shorter distance or different locations.")
-        if resp.status_code != 200:
-            try:
-                detail = resp.json().get("error", resp.text)
-            except Exception:
-                detail = resp.text
-            raise RuntimeError(f"Route request failed ({resp.status_code}): {detail}")
-        return resp.json()
-
-
-# ---------------------------------------------------------------------------
-# Tool: generate_map
-# ---------------------------------------------------------------------------
-
-@mcp.tool()
-async def generate_map(
-    place: Annotated[
-        str | None, Field(description="Place name to center the map on (geocoded server-side unless 'location' is also given).")
-    ] = None,
-    location: Annotated[
-        Location | None,
-        Field(description="Explicit coordinates for 'place'. If given, geocoding of 'place' is skipped. Not necessarily the map's final center — see server instructions."),
-    ] = None,
-    markers: Annotated[list[Marker] | None, Field(description="Locations to pin on the map.")] = None,
-    name: Annotated[str | None, Field(description="Map name stored in the data file.")] = None,
-    route: Annotated[
-        RouteInput | None,
-        Field(description="Route to overlay — pass compute_route()'s result directly. Add/override 'color' (hex) to customize."),
-    ] = None,
-    color_set: Annotated[
-        str | None,
-        Field(description="Color theme name — see server instructions for the list. Only set when explicitly requested."),
-    ] = None,
-    format: Annotated[Literal["png", "svg"], Field(description="'png' (default) or 'svg'.")] = "png",
-    canvas_width: Annotated[int | None, Field(description="Canvas width in pixels (default 1000).")] = None,
-    canvas_height: Annotated[int | None, Field(description="Canvas height in pixels (default 600).")] = None,
-    ctx: Context = None,
-) -> list:
-    """Generate a styled map image and save it to Downloads.
-
-    May return a pending dataKey instead of the image — see server instructions for the
-    check_map_status follow-up flow.
-
-    Example: generate_map(place="Tokyo Station")
-    """
-    has_center = place or location is not None
-    has_route_coords = route is not None and route.coords is not None and len(route.coords) >= 2
-    if not has_center and not markers and not has_route_coords:
-        raise ValueError("Specify 'place', 'location', 'markers', or a 'route' with coords.")
-
-    body: dict = {}
-    if place:
-        body["place"] = place
-    if location is not None:
-        body["center"] = location.model_dump()
-    if markers is not None:
-        body["markers"] = [m.model_dump(exclude_none=True) for m in markers]
-    if name is not None:
-        body["name"] = name
-    if color_set is not None:
-        body["colorSet"] = color_set
-    if route is not None:
-        body["route"] = route.model_dump(by_alias=True, exclude_none=True)
-
+async def _generate_map_common(body: dict, ctx: Context | None) -> list:
+    """4つのgenerate_*ツール共通のenqueue→poll→download→has_link判定→結果構築フロー。
+    body["name"]をファイル名の元にも使う。常にformat="png"・デフォルトcolor_setで
+    ダウンロードする(別の見た目が欲しければredownload_mapで取り直す)。"""
     async with httpx.AsyncClient() as client:
         # 1. Enqueue
         resp = await client.post(f"{BASE_URL}/request", json=body, timeout=30)
@@ -308,19 +215,127 @@ async def generate_map(
         if status == "pending":
             return _still_in_progress_result(data_key)
 
-        # 3. Download
-        image_bytes = await _download(client, data_key, format, color_set,
-                                      canvas_width, canvas_height)
+        # 3. Download + linkの有無判定
+        image_bytes = await _download(client, data_key, "png", None)
+        has_link = await _has_any_link(client, data_key)
 
+    label = body.get("name") or data_key
+    return _build_success_result(image_bytes, _make_filename(label, "png"), data_key, has_link)
+
+
+# ---------------------------------------------------------------------------
+# Tool: generate_map
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+async def generate_map(
+    place: Annotated[str, Field(description="Place name to center the map on (geocoded server-side).")],
+    ctx: Context = None,
+) -> list:
+    """Generate a styled map centered on a single place.
+
+    Example: generate_map(place="Tokyo Station")
+    """
+    body: dict = {"place": place, "name": place}
+    return await _generate_map_common(body, ctx)
+
+
+# ---------------------------------------------------------------------------
+# Tool: generate_markers_map
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+async def generate_markers_map(
+    markers: Annotated[
+        list[Marker], Field(description="Locations to pin on the map. At least one required.")
+    ],
+    place: Annotated[
+        str | None,
+        Field(description="Optional: place to center the map on. If omitted, the center is computed automatically from the markers."),
+    ] = None,
+    ctx: Context = None,
+) -> list:
+    """Generate a map with multiple pinned locations.
+
+    Example: generate_markers_map(markers=[{"label": "Tokyo Tower"}, {"label": "Zojoji Temple"}])
+    """
+    if not markers:
+        raise ValueError("'markers' must contain at least one marker.")
+    label = place or "_".join(m.label for m in markers)[:40]
+    body: dict = {"markers": [m.model_dump(exclude_none=True) for m in markers], "name": label}
     if place:
-        label = place
-    elif location is not None:
-        label = f"{location.lat}_{location.lng}"
-    elif markers:
-        label = "_".join(m.label or "" for m in markers)[:40]
-    else:
-        label = "route"
-    return _build_success_result(image_bytes, _make_filename(label, format), data_key)
+        body["place"] = place
+    return await _generate_map_common(body, ctx)
+
+
+# ---------------------------------------------------------------------------
+# Tool: generate_route_map
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+async def generate_route_map(
+    # Pythonの予約語のため実引数名は'from_'。JSON上のキー名はvalidation_aliasで'from'にする
+    # (Field(alias=...)だとFastMCPが関数呼び出し時もalias名でキーワード引数を組み立てて
+    # TypeErrorになるため、入力側だけをマッピングするvalidation_aliasを使う)。
+    from_: Annotated[str, Field(validation_alias="from", description="Route start. Place name to geocode.")],
+    to: Annotated[str, Field(description="Route end. Place name to geocode.")],
+    mode: Annotated[Literal["walking", "driving"], Field(description="Default 'walking'.")] = "walking",
+    place: Annotated[
+        str | None,
+        Field(description="Optional: place to center the map on. If omitted, the center is computed automatically from the route."),
+    ] = None,
+    ctx: Context = None,
+) -> list:
+    """Compute a walking/driving route between two places and generate a map with it overlaid.
+    Both endpoints are pinned on the map automatically — do not also call generate_markers_map for them.
+
+    Example: generate_route_map(from="Tokyo Station", to="Tokyo Tower", mode="walking")
+    """
+    # from/toはそのままバックエンドの/requestへ渡す(サーバー側がジオコード+ルート探索+
+    # 地図生成を1回のリクエスト内で行う。以前はここで先に/routeを呼んでルートを計算して
+    # いたが、それだと地図生成用の道路データ取得と合わせて同じ範囲の道路網を2回取得する
+    # ことになっていたため、サーバー側で1回にまとめた)。
+    label = place or "route"
+    body: dict = {"route": {"from": {"label": from_}, "to": {"label": to}, "mode": mode}, "name": label}
+    if place:
+        body["place"] = place
+    return await _generate_map_common(body, ctx)
+
+
+# ---------------------------------------------------------------------------
+# Tool: generate_hyperlink_map
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+async def generate_hyperlink_map(
+    markers: Annotated[
+        list[Marker],
+        Field(description="Locations to pin. At least one required, and at least one marker must "
+                           "have 'link' set (its official website URL) — otherwise use generate_markers_map instead."),
+    ],
+    place: Annotated[
+        str | None,
+        Field(description="Optional: place to center the map on. If omitted, the center is computed automatically from the markers."),
+    ] = None,
+    ctx: Context = None,
+) -> list:
+    """Generate a map with pinned locations whose website links are clickable in the resulting map link.
+    Requires at least one marker to have 'link' set — use generate_markers_map if none do.
+
+    Example: generate_hyperlink_map(markers=[{"label": "Tokyo Tower", "link": "https://www.tokyotower.co.jp/"}])
+    """
+    if not markers:
+        raise ValueError("'markers' must contain at least one marker.")
+    if not any(m.link for m in markers):
+        raise ValueError(
+            "generate_hyperlink_map requires at least one marker with 'link' set. "
+            "Use generate_markers_map instead if no marker has a link."
+        )
+    label = place or "_".join(m.label for m in markers)[:40]
+    body: dict = {"markers": [m.model_dump(exclude_none=True) for m in markers], "name": label}
+    if place:
+        body["place"] = place
+    return await _generate_map_common(body, ctx)
 
 
 # ---------------------------------------------------------------------------
@@ -331,22 +346,11 @@ async def generate_map(
 async def check_map_status(
     data_key: Annotated[
         str,
-        Field(description="The dataKey returned by a generate_map call that reported it was still in progress."),
+        Field(description="The dataKey returned by a generate_* call that reported it was still in progress."),
     ],
-    color_set: Annotated[
-        str | None,
-        Field(description="Color theme, matching what generate_map was called with, if any."),
-    ] = None,
-    format: Annotated[Literal["png", "svg"], Field(description="Matching what generate_map was called with.")] = "png",
-    canvas_width: Annotated[
-        int | None, Field(description="Canvas width, matching what generate_map was called with, if any.")
-    ] = None,
-    canvas_height: Annotated[
-        int | None, Field(description="Canvas height, matching what generate_map was called with, if any.")
-    ] = None,
     ctx: Context = None,
 ) -> list:
-    """Poll a pending generate_map job and download it once ready. Wait ~20-30s between calls.
+    """Poll a pending generate_* job and download it once ready. Wait ~20-30s between calls.
 
     Example: check_map_status(data_key="20260618aBcDeFgHiJ")
     """
@@ -365,10 +369,10 @@ async def check_map_status(
                 await ctx.report_progress(0, 1, "Map generation still in progress...")
             return _still_in_progress_result(data_key)
 
-        image_bytes = await _download(client, data_key, format, color_set,
-                                      canvas_width, canvas_height)
+        image_bytes = await _download(client, data_key, "png", None)
+        has_link = await _has_any_link(client, data_key)
 
-    return _build_success_result(image_bytes, _make_filename(data_key, format), data_key)
+    return _build_success_result(image_bytes, _make_filename(data_key, "png"), data_key, has_link)
 
 
 # ---------------------------------------------------------------------------
@@ -377,35 +381,88 @@ async def check_map_status(
 
 @mcp.tool()
 async def redownload_map(
-    data_key: Annotated[str, Field(description="The dataKey returned by a previous generate_map call.")],
+    data_key: Annotated[str, Field(description="The dataKey returned by a previous generate_* call.")],
     color_set: Annotated[
         str | None,
         Field(description="Color theme — see server instructions for the list. Only set when explicitly requested."),
     ] = None,
     format: Annotated[Literal["png", "svg"], Field(description="'png' (raster) or 'svg' (vector).")] = "png",
-    canvas_width: Annotated[int | None, Field(description="Canvas width in pixels (default 1000).")] = None,
-    canvas_height: Annotated[int | None, Field(description="Canvas height in pixels (default 600).")] = None,
 ) -> list:
-    """Re-download a prior map in a different color theme, format, or size — instant, no regeneration.
+    """Re-download a prior map in a different color theme or format — instant, no regeneration.
 
     Example: redownload_map(data_key="20260618aBcDeFgHiJ", color_set="black")
     """
     async with httpx.AsyncClient() as client:
-        image_bytes = await _download(client, data_key, format, color_set,
-                                      canvas_width, canvas_height)
+        image_bytes = await _download(client, data_key, format, color_set)
 
     out_path = _make_filename(data_key, format)
     out_path.write_bytes(image_bytes)
 
+    # Image(format=...)はmimeTypeを"image/{format}"にそのまま埋め込む。svgの正式なmimeTypeは
+    # "image/svg+xml"なので、ここだけ変換する(バックエンドへのリクエストやファイル名生成には
+    # 影響しない、format変数自体は"svg"のまま)。
+    image_format = "svg+xml" if format == "svg" else format
     return [
-        Image(data=image_bytes, format="png"),
+        Image(data=image_bytes, format=image_format),
         f"Map saved: {out_path}  (dataKey={data_key}, colorSet={color_set}, format={format})",
     ]
 
 
 # ---------------------------------------------------------------------------
+# Orphan watchdog
+# ---------------------------------------------------------------------------
+#
+# MCPホスト(Claude Desktop)は"uv run ... mapnetwork_mcp/server.py"でこのプロセスを起動する。
+# Windows上ではuvが自身のプロセス置換(execve相当)を行えないため、"uv.exe -> python.exe"という
+# 子プロセスになり、さらに観測上はその下にもう一段python.exeが生まれる(mcp SDK/anyio側の
+# 挙動と見られるが詳細未特定)。標準入力のEOFで自発終了するstdio_serverのロジックは正しく
+# 機能する(到達不能URLでの単体テストで確認済み)一方、実運用では拡張機能の無効化/更新/
+# アンインストール時にホストが子孫プロセスツリー全体を確実にkillできず、末端のpython.exeが
+# 孤児として残留し、.venv配下の実行ファイルをロックし続けてアンインストール自体が失敗する
+# 事故が確認された(Windows特有: プロセスをkillしても既定では子孫まで自動的には終了しない)。
+# stdinパイプのEOF検知に頼らず、起動時の親プロセス(uv.exe)の生死を直接ポーリングし、
+# 親が消えていたら自分も終了することで、この孤児化を防ぐ。
+_ORPHAN_CHECK_INTERVAL_SEC = 5.0
+
+
+def _is_process_alive(pid: int) -> bool:
+    if sys.platform == "win32":
+        import ctypes
+
+        PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+        STILL_ACTIVE = 259
+        handle = ctypes.windll.kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+        if not handle:
+            return False
+        try:
+            exit_code = ctypes.c_ulong()
+            if not ctypes.windll.kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code)):
+                return False
+            return exit_code.value == STILL_ACTIVE
+        finally:
+            ctypes.windll.kernel32.CloseHandle(handle)
+    else:
+        try:
+            os.kill(pid, 0)
+            return True
+        except OSError:
+            return False
+
+
+def _start_orphan_watchdog() -> None:
+    parent_pid = os.getppid()
+
+    def _watch() -> None:
+        while True:
+            time.sleep(_ORPHAN_CHECK_INTERVAL_SEC)
+            if not _is_process_alive(parent_pid):
+                os._exit(1)
+
+    threading.Thread(target=_watch, daemon=True, name="orphan-watchdog").start()
+
 
 def main() -> None:
+    _start_orphan_watchdog()
     mcp.run()
 
 
