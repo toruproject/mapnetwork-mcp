@@ -185,10 +185,12 @@ def _still_in_progress_result(data_key: str) -> list:
     )]
 
 
-async def _generate_map_common(body: dict, ctx: Context | None) -> list:
+async def _generate_map_common(body: dict, ctx: Context | None, label: str | None = None) -> list:
     """4つのgenerate_*ツール共通のenqueue→poll→download→has_link判定→結果構築フロー。
-    body["name"]をファイル名の元にも使う。常にformat="png"・デフォルトcolor_setで
-    ダウンロードする(別の見た目が欲しければredownload_mapで取り直す)。"""
+    labelはダウンロードファイル名の元にのみ使う(バックエンド側もplace/markers/routeから
+    同じ表示名をconfigDict.nameとして独自に導出するため、bodyには含めない)。
+    常にformat="png"・デフォルトcolor_setでダウンロードする(別の見た目が欲しければ
+    redownload_mapで取り直す)。"""
     async with httpx.AsyncClient() as client:
         # 1. Enqueue
         resp = await client.post(f"{BASE_URL}/request", json=body, timeout=30)
@@ -219,8 +221,7 @@ async def _generate_map_common(body: dict, ctx: Context | None) -> list:
         image_bytes = await _download(client, data_key, "png", None)
         has_link = await _has_any_link(client, data_key)
 
-    label = body.get("name") or data_key
-    return _build_success_result(image_bytes, _make_filename(label, "png"), data_key, has_link)
+    return _build_success_result(image_bytes, _make_filename(label or data_key, "png"), data_key, has_link)
 
 
 # ---------------------------------------------------------------------------
@@ -236,8 +237,8 @@ async def generate_map(
 
     Example: generate_map(place="Tokyo Station")
     """
-    body: dict = {"place": place, "name": place}
-    return await _generate_map_common(body, ctx)
+    body: dict = {"place": place}
+    return await _generate_map_common(body, ctx, label=place)
 
 
 # ---------------------------------------------------------------------------
@@ -262,10 +263,10 @@ async def generate_markers_map(
     if not markers:
         raise ValueError("'markers' must contain at least one marker.")
     label = place or "_".join(m.label for m in markers)[:40]
-    body: dict = {"markers": [m.model_dump(exclude_none=True) for m in markers], "name": label}
+    body: dict = {"markers": [m.model_dump(exclude_none=True) for m in markers]}
     if place:
         body["place"] = place
-    return await _generate_map_common(body, ctx)
+    return await _generate_map_common(body, ctx, label=label)
 
 
 # ---------------------------------------------------------------------------
@@ -296,10 +297,10 @@ async def generate_route_map(
     # いたが、それだと地図生成用の道路データ取得と合わせて同じ範囲の道路網を2回取得する
     # ことになっていたため、サーバー側で1回にまとめた)。
     label = place or "route"
-    body: dict = {"route": {"from": {"label": from_}, "to": {"label": to}, "mode": mode}, "name": label}
+    body: dict = {"route": {"from": {"label": from_}, "to": {"label": to}, "mode": mode}}
     if place:
         body["place"] = place
-    return await _generate_map_common(body, ctx)
+    return await _generate_map_common(body, ctx, label=label)
 
 
 # ---------------------------------------------------------------------------
@@ -332,10 +333,10 @@ async def generate_hyperlink_map(
             "Use generate_markers_map instead if no marker has a link."
         )
     label = place or "_".join(m.label for m in markers)[:40]
-    body: dict = {"markers": [m.model_dump(exclude_none=True) for m in markers], "name": label}
+    body: dict = {"markers": [m.model_dump(exclude_none=True) for m in markers]}
     if place:
         body["place"] = place
-    return await _generate_map_common(body, ctx)
+    return await _generate_map_common(body, ctx, label=label)
 
 
 # ---------------------------------------------------------------------------
