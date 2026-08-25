@@ -36,10 +36,6 @@
       "description": "Compute a walking or driving route between two places and generate a map with it overlaid"
     },
     {
-      "name": "generate_hyperlink_map",
-      "description": "Generate a map with pinned locations that are clickable links to their official websites"
-    },
-    {
       "name": "check_map_status",
       "description": "Poll a pending map generation job and download it once ready"
     },

@@ -1,10 +1,10 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "MapNetwork MCP - 出力JSON仕様",
-  "description": "mapnetwork_mcp/server.py で定義されている6つのMCPツールの戻り値（MCPのCallToolResult）の仕様。各ツールの実装（FastMCPの変換ルールを含む）から実機検証して起こしたもの。",
+  "description": "mapnetwork_mcp/server.py で定義されている5つのMCPツールの戻り値（MCPのCallToolResult）の仕様。各ツールの実装（FastMCPの変換ルールを含む）から実機検証して起こしたもの。",
   "notes": [
-    "全ツールとも戻り値の型注釈が具体的な型パラメータを持たない 'list' であるため、FastMCPは構造化出力（structuredContent／tools/listのoutputSchema）を生成しない。実機確認済み：6ツールすべてtools/listのoutputSchemaはnull、tools/callのstructuredContentも常にnull。呼び出し側はcontent配列（テキスト／画像）のみをパースすればよい。",
-    "全6ツールとも'list'を返す関数で、リストの各要素がFastMCPによってcontentの1項目に変換される：Imageインスタンス→ImageContent、文字列→TextContent。",
+    "全ツールとも戻り値の型注釈が具体的な型パラメータを持たない 'list' であるため、FastMCPは構造化出力（structuredContent／tools/listのoutputSchema）を生成しない。実機確認済み：5ツールすべてtools/listのoutputSchemaはnull、tools/callのstructuredContentも常にnull。呼び出し側はcontent配列（テキスト／画像）のみをパースすればよい。",
+    "全5ツールとも'list'を返す関数で、リストの各要素がFastMCPによってcontentの1項目に変換される：Imageインスタンス→ImageContent、文字列→TextContent。",
     "ツール内で例外（ValueError/RuntimeError、または引数バリデーション失敗によるpydantic.ValidationError、httpxの接続エラー等）が送出された場合、FastMCPがそれを捕捉し、isError=trueと単一のTextContentに包んで返す。テキストの形式は常に 'Error executing tool <tool_name>: <str(exception)>'。ツール関数の中身でtry/exceptしてエラーメッセージを整形している箇所（Request rejected/Map generation failed等）もこの共通ラッパーの中を通る。",
     "pydantic.ValidationErrorのstr()は複数行になる（フィールドパス、エラー種別、入力値、pydantic.devのドキュメントURLを含む）。例：\"1 validation error for generate_markers_mapArguments\\nmarkers.0.place\\n  Extra inputs are not permitted [type=extra_forbidden, input_value='Tokyo', input_type=str]\\n    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden\"",
     "redownload_mapのImageContentのmimeTypeは、指定したformat引数に連動する：format='png'なら'image/png'、format='svg'なら'image/svg+xml'（SVGの正式なMIMEタイプ。Image(format=...)ヘルパーはformat文字列をそのまま'image/{format}'に埋め込むだけなので、サーバー側で'svg'→'svg+xml'に変換してから渡している。過去バージョンではformat='svg'でもmimeTypeが常に'image/png'になる不具合があったが修正済み）。"
@@ -77,7 +77,7 @@
     },
     "MapSuccessResult": {
       "type": "object",
-      "description": "地図が生成/取得できた場合の共通の成功形。generate_*系4ツール・check_map_status・redownload_mapすべてがこの形で返す",
+      "description": "地図が生成/取得できた場合の共通の成功形。generate_*系3ツール・check_map_status・redownload_mapすべてがこの形で返す",
       "properties": {
         "isError": { "const": false },
         "structuredContent": { "const": null },
@@ -92,7 +92,7 @@
               "properties": {
                 "text": {
                   "type": "string",
-                  "description": "'Map saved: <ローカル保存パス>\\ndataKey: <dataKey>\\n\\n<hyperlink Map: .../generate?dataKey=...&lock=true か Open in editor: .../generate?dataKey=...>\\n\\nTip: call redownload_map(...) ...' の形式（generate_*/check_map_statusの場合）。redownload_mapのみ形式が異なる（下記参照）"
+                  "description": "'Map saved: <ローカル保存パス>\\ndataKey: <dataKey>\\n\\nDownload: .../download?dataKey=...\\nOpen in editor: .../generate?dataKey=...[&lock=true]\\n\\nTip: call redownload_map(...) ...' の形式（generate_*/check_map_statusの場合）。&lock=trueはlinkを持つmarkerが1件でもある場合にのみ付く。redownload_mapのみ形式が異なる（下記参照）"
                 }
               }
             }
@@ -110,12 +110,13 @@
         "error": { "$ref": "#/definitions/ErrorResult" }
       },
       "notes": [
-        "successのcontent[1].textにある2行目のリンクは、生成された地図のplaceDictにlinkを持つマーカーが1つでもあるかどうかで動的に切り替わる（_has_any_link）：",
-        "  linkあり: 'hyperlink Map: https://mapnetwork.app/generate?dataKey=<dataKey>&lock=true'",
+        "successのcontent[1].textにあるOpen in editorリンクは、生成された地図のplaceDictにlinkを持つマーカーが1つでもあるかどうかで&lock=trueの有無が動的に切り替わる（_has_any_link）：",
+        "  linkあり: 'Open in editor: https://mapnetwork.app/generate?dataKey=<dataKey>&lock=true'",
         "  linkなし: 'Open in editor: https://mapnetwork.app/generate?dataKey=<dataKey>'",
-        "generate_mapはmarkersを持たないので、通常はlinkなし（'Open in editor'）になる"
+        "generate_mapはmarkersを持たないので、通常はlinkなし（&lock=trueなし）になる",
+        "Downloadリンク（https://mapnetwork.app/download?dataKey=<dataKey>）も常に含まれる"
       ],
-      "example_success_text": "Map saved: C:\\Users\\you\\Downloads\\map_Tokyo_Station_20260618_120000.png\ndataKey: 20260618aBcDeFgHiJ\n\nOpen in editor: https://mapnetwork.app/generate?dataKey=20260618aBcDeFgHiJ\n\nTip: call redownload_map(data_key='20260618aBcDeFgHiJ', ...) to get this map in a different color theme or format (svg/png) without regenerating.",
+      "example_success_text": "Map saved: C:\\Users\\you\\Downloads\\map_Tokyo_Station_20260618_120000.png\ndataKey: 20260618aBcDeFgHiJ\n\nDownload: https://mapnetwork.app/download?dataKey=20260618aBcDeFgHiJ\nOpen in editor: https://mapnetwork.app/generate?dataKey=20260618aBcDeFgHiJ\n\nTip: call redownload_map(data_key='20260618aBcDeFgHiJ', ...) to get this map in a different color theme or format (svg/png) without regenerating.",
       "example_error_texts": [
         "Error executing tool generate_map: All connection attempts failed",
         "Error executing tool generate_map: Request rejected (400): <backend error detail>",
@@ -129,8 +130,8 @@
         "error": { "$ref": "#/definitions/ErrorResult" }
       },
       "notes": [
-        "generate_markers_mapとgenerate_hyperlink_mapはmarkersの型（Marker: label必須+link任意）を共有しており、generate_markers_mapのmarkerにlinkを設定してもエラーにならない。link有無を問わずmarkersが1件以上あれば成功する（全markerがlink無しなのが通常のケースだが、必須ではない）。",
-        "markersの中にlinkを持つものが1件でもあれば、successのcontent[1].textの2行目が'hyperlink Map: .../generate?dataKey=...&lock=true'になる（generate_hyperlink_mapを呼んだ場合と同じ判定ロジック、_has_any_link）。全markerがlink未設定なら'Open in editor'になる。"
+        "markersのMarker型（label必須+link任意）はlink有無を問わず1件以上あれば成功する（全markerがlink無しなのが通常のケースだが、必須ではない）。",
+        "markersの中にlinkを持つものが1件でもあれば、successのcontent[1].textのOpen in editorリンクに'&lock=true'が付く（_has_any_link）。全markerがlink未設定なら付かない。"
       ],
       "example_error_texts": [
         "Error executing tool generate_markers_map: 'markers' must contain at least one marker.",
@@ -145,7 +146,7 @@
       },
       "notes": [
         "compute_routeという別ツールは存在せず（廃止済み）、専用のルート探索エンドポイントも存在しない（こちらも廃止済み）。generate_route_mapは{\"from\":{\"label\":...}, \"to\":{\"label\":...}, \"mode\":...}をそのままバックエンドの/requestのrouteフィールドに詰めて1回だけ送るだけで、ジオコード・ルート探索・地図生成は全てバックエンドのワーカー内(build_map_data)で行われる。ルート探索は地図生成用に取得した道路データをそのまま再利用するため、道路網の二重取得が発生しない。",
-        "from/toはmarkerとして自動でピン留めされるが、linkを持たせる手段は無い。そのため生成データにlinkを持つエントリは発生せず、成功時のリンクは常に'Open in editor'になる。",
+        "from/toはmarkerとして自動でピン留めされるが、linkを持たせる手段は無い。そのため生成データにlinkを持つエントリは発生せず、成功時のOpen in editorリンクに'&lock=true'は付かない。",
         "ルート探索がバックエンド内(ワーカー)で行われるため、「ルートが見つからない」等の失敗はgenerate_route_map呼び出し時点では判明せず、他のgenerate_*ツールと同じ一般的な地図生成失敗（'Map generation failed (dataKey=...). Try a different location.'）として現れる。INITIAL_WAIT_SEC(40秒)以内に失敗が判明すればそのままエラーとして返るが、それより時間がかかる場合は一旦pendingが返り、check_map_status経由で最終的に失敗が判明する。"
       ],
       "example_error_texts": [
@@ -153,22 +154,6 @@
         "Error executing tool generate_route_map: Map generation failed (dataKey=20260618aBcDeFgHiJ). Try a different location.",
         "Error executing tool generate_route_map: 1 validation error for generate_route_mapArguments\nfrom\n  Field required [type=missing, input_value={'to': 'Tokyo Tower'}, input_type=dict]\n    For further information visit https://errors.pydantic.dev/2.13/v/missing",
         "Error executing tool generate_route_map: 1 validation error for generate_route_mapArguments\nmode\n  Input should be 'walking' or 'driving' [type=literal_error, input_value='flying', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/literal_error"
-      ]
-    },
-    "generate_hyperlink_map": {
-      "returns": {
-        "success": { "$ref": "#/definitions/MapSuccessResult" },
-        "pending": { "$ref": "#/definitions/PendingResult" },
-        "error": { "$ref": "#/definitions/ErrorResult" }
-      },
-      "notes": [
-        "generate_markers_mapと同一のMarker型（label必須+link任意）を使うが、ツール本体が追加のバリデーションとして「markersのうち少なくとも1件はlinkを持つこと」を要求する（Pydanticモデルのextra=\"forbid\"とは別に、関数内でanyチェックしている）。1件も持たない場合は下記example_error_textsの3件目のエラーになる。",
-        "markersの中にlinkを持つものが1件でもあれば、successのcontent[1].textの2行目が'hyperlink Map: .../generate?dataKey=...&lock=true'になる（バリデーションを通過した時点で必ず1件以上linkを持つため、generate_hyperlink_mapの成功結果は常にhyperlink Mapリンクになり、'Open in editor'にはならない）。"
-      ],
-      "example_error_texts": [
-        "Error executing tool generate_hyperlink_map: 'markers' must contain at least one marker.",
-        "Error executing tool generate_hyperlink_map: 1 validation error for generate_hyperlink_mapArguments\nmarkers.0.place\n  Extra inputs are not permitted [type=extra_forbidden, input_value='Tokyo', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden",
-        "Error executing tool generate_hyperlink_map: generate_hyperlink_map requires at least one marker with 'link' set. Use generate_markers_map instead if no marker has a link."
       ]
     },
     "check_map_status": {
@@ -179,7 +164,7 @@
       },
       "notes": [
         "successの場合、_make_filename(data_key, \"png\")でファイル名を作るため、保存パスのslugにはdataKeyがそのまま使われる（generate_*の成功時はplace/markerラベル由来のslugになるのと異なる）。",
-        "hyperlink Map / Open in editorの出し分けは、check_map_status呼び出し時点で実データのplaceDictを再取得して判定する（元のツール呼び出しがgenerate_hyperlink_mapだったかどうかには依存しない）。",
+        "Open in editorリンクへの&lock=true付与は、check_map_status呼び出し時点で実データのplaceDictを再取得して判定する（元のgenerate_*ツール呼び出しの引数には依存しない）。",
         "呼び出しごとにCHECK_THROTTLE_SEC(5秒)のスリープが必ず入るため、pending応答であっても即座には返らない。"
       ]
     },
@@ -211,7 +196,7 @@
                     "text": {
                       "type": "string",
                       "pattern": "^Map saved: .+ \\(dataKey=.+, colorSet=.*, format=(png|svg)\\)$",
-                      "description": "'Map saved: <path>  (dataKey=<dataKey>, colorSet=<color_set|None>, format=<png|svg>)'。generate_*系と異なりhyperlink Map/Open in editorのリンク案内は含まれない"
+                      "description": "'Map saved: <path>  (dataKey=<dataKey>, colorSet=<color_set|None>, format=<png|svg>)'。generate_*系と異なりDownload/Open in editorのリンク案内は含まれない"
                     }
                   }
                 }
@@ -224,7 +209,7 @@
       },
       "notes": [
         "redownload_mapにはpendingパターンはない（既存dataKeyのデータを即座にダウンロードするだけで、生成ジョブのポーリングを行わない）。",
-        "successのテキストにはlinkの有無による出し分け（hyperlink Map / Open in editor）が含まれない。元のgenerate_*呼び出し結果に含まれていたリンクをそのまま使い回す想定。",
+        "successのテキストにはDownload/Open in editorのリンク案内自体が含まれない。元のgenerate_*呼び出し結果に含まれていたリンクをそのまま使い回す想定。",
         "color_setを指定しない場合、text内は'colorSet=None'という文字列になる（Pythonのf-stringでNoneがそのまま埋め込まれるため）。"
       ],
       "example_success_text": "Map saved: C:\\Users\\you\\Downloads\\map_20260618aBcDeFgHiJ_20260618_120500.svg  (dataKey=20260618aBcDeFgHiJ, colorSet=black, format=svg)",

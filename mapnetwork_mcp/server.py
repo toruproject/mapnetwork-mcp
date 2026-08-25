@@ -33,9 +33,9 @@ CHECK_THROTTLE_SEC = 5.0
 # extra="ignore"がデフォルトのため気づかれずに黙って無視されていたことが判明した)。
 
 class Marker(BaseModel):
-    """generate_markers_map/generate_hyperlink_map共通。labelは必須、linkは任意で公式サイトURLを
-    付けられる。generate_markers_mapはlink無しのマーカーが混在してもよく(むしろ通常はこちら)、
-    generate_hyperlink_mapは少なくとも1つのマーカーがlinkを持つことを要求する(ツール側で検証)。"""
+    """generate_markers_mapのマーカー。labelは必須、linkは任意で公式サイトURLを付けられる
+    (バックエンド側がPlaces APIで自動補完する場合も多いが、モデルが確度高く知っている場合は
+    明示的に渡してもよい)。link無しのマーカーが混在してもよい(むしろ通常はこちら)。"""
     model_config = ConfigDict(extra="forbid")
 
     label: str = Field(description="Place name to geocode and display.")
@@ -53,22 +53,18 @@ mcp = FastMCP(
         "## Key capabilities — pick the tool that matches what you need\n"
         "- **Single location**: `generate_map(place=...)` — centers a map on one place.\n"
         "- **Multiple pinned locations**: `generate_markers_map(markers=[{\"label\": ...}, ...])` — "
-        "pins several places on one map. Each marker needs a `label`. Use this whenever the user "
-        "asks to show multiple places on a single map.\n"
+        "pins several places on one map. Each marker needs a `label`, and may optionally include "
+        "`link` (its official website URL, if known) to make that pin a clickable link in the "
+        "result's 'Open in editor' link. Use this whenever the user asks to show multiple places "
+        "on a single map, or wants a map they (or someone else) can click through to visit the "
+        "pinned places' websites.\n"
         "- **Walking/driving route**: `generate_route_map(from=..., to=..., mode=...)` — computes a "
-        "route between two places and draws it on the map, with both endpoints pinned automatically. "
-        "`mode` is 'walking' (default) or 'driving'.\n"
-        "- **Hyperlink map**: `generate_hyperlink_map(markers=[{\"label\": ..., \"link\": ...}, ...])` "
-        "— like generate_markers_map, but produces a map where markers are clickable links to their "
-        "official websites. Set `link` on any marker whose official website you already know (e.g. "
-        "from search results or prior knowledge); at least one marker must have `link` set, or the "
-        "call errors. Use this whenever the user wants a map they (or someone else) can click "
-        "through to visit the pinned places' websites.\n"
-        "- Every generate_* call produces a PNG at default size and theme — see 'Important: "
-        "re-download without regenerating' below to view it differently.\n\n"
+        "route between two places and draws it on the map.\n"
+        "- Every generate_* call produces a PNG at the default color theme — see 'Important: "
+        "re-download without regenerating' below to change the theme or format without regenerating.\n\n"
         "## If generation is still in progress\n"
         "For busy areas, any generate_* tool may return before the map is ready, with a `dataKey` "
-        "and a message asking you to check back. In that case, wait about 20-30 seconds and "
+        "and a message asking you to check back. In that case, wait about 10-20 seconds and "
         "call `check_map_status(data_key=...)` — do not call the generate_* tool again for the same "
         "request, that only starts a redundant duplicate job. Repeat `check_map_status` "
         "(with the same wait between calls) until it returns the image.\n\n"
@@ -80,9 +76,8 @@ mcp = FastMCP(
         "MapNetwork supports 11 color themes (white, darkBlue, darkGreen, popArt, lightBlue, "
         "lightGreen, beige, magenta, gray, black, brawn).\n\n"
         "## Sharing the generated map\n"
-        "Every successful result includes a Download link, plus either a 'Hyperlink Map' link "
-        "(read-only, linked markers clickable) or an 'Open in editor' link. "
-        "Mention whichever one you receive.\n\n"
+        "Every successful result includes a Download link and an 'Open in editor' link — "
+        "mention both to the user.\n\n"
         "## Parameter discipline\n"
         "- **place/label**: `place`, a marker's `label`, and route's `from`/`to` must each be a "
         "place name specific enough for the server to geocode it to a single, unambiguous "
@@ -156,19 +151,19 @@ async def _poll_with_budget(
 
 def _build_success_result(image_bytes: bytes, out_path: Path, data_key: str, has_link: bool) -> list:
     out_path.write_bytes(image_bytes)
-    # linkを持つマーカーが1つでもあれば閲覧専用(lock)リンクを、無ければ編集用リンクを返す。
+    # linkを持つマーカーが1つでもあれば、"Open in editor"を閲覧専用(lock)モードのURLにする。
     # どのツールを呼んだかではなく実際に生成されたplaceDictの中身で判定している(_has_any_link)。
-    link_line = (
-        f"hyperlink Map: https://mapnetwork.app/generate?dataKey={data_key}&lock=true"
-        if has_link else
-        f"Open in editor: https://mapnetwork.app/generate?dataKey={data_key}"
-    )
+    editor_url = f"https://mapnetwork.app/generate?dataKey={data_key}"
+    if has_link:
+        editor_url += "&lock=true"
+    download_url = f"https://mapnetwork.app/download?dataKey={data_key}"
     return [
         Image(data=image_bytes, format="png"),
         (
             f"Map saved: {out_path}\n"
             f"dataKey: {data_key}\n\n"
-            f"{link_line}\n\n"
+            f"Download: {download_url}\n"
+            f"Open in editor: {editor_url}\n\n"
             f"Tip: call redownload_map(data_key='{data_key}', ...) to get this map "
             f"in a different color theme or format (svg/png) without regenerating."
         ),
@@ -186,7 +181,7 @@ def _still_in_progress_result(data_key: str) -> list:
 
 
 async def _generate_map_common(body: dict, ctx: Context | None, label: str | None = None) -> list:
-    """4つのgenerate_*ツール共通のenqueue→poll→download→has_link判定→結果構築フロー。
+    """3つのgenerate_*ツール共通のenqueue→poll→download→has_link判定→結果構築フロー。
     labelはダウンロードファイル名の元にのみ使う(バックエンド側もplace/markers/routeから
     同じ表示名をconfigDict.nameとして独自に導出するため、bodyには含めない)。
     常にformat="png"・デフォルトcolor_setでダウンロードする(別の見た目が欲しければ
@@ -258,7 +253,7 @@ async def generate_markers_map(
 ) -> list:
     """Generate a map with multiple pinned locations.
 
-    Example: generate_markers_map(markers=[{"label": "Tokyo Tower"}, {"label": "Zojoji Temple"}])
+    Example: generate_markers_map(markers=[{"label": "Tokyo Tower", "link": "https://www.tokyotower.co.jp/"}, {"label": "Zojoji Temple"}])
     """
     if not markers:
         raise ValueError("'markers' must contain at least one marker.")
@@ -298,42 +293,6 @@ async def generate_route_map(
     # ことになっていたため、サーバー側で1回にまとめた)。
     label = place or "route"
     body: dict = {"route": {"from": {"label": from_}, "to": {"label": to}, "mode": mode}}
-    if place:
-        body["place"] = place
-    return await _generate_map_common(body, ctx, label=label)
-
-
-# ---------------------------------------------------------------------------
-# Tool: generate_hyperlink_map
-# ---------------------------------------------------------------------------
-
-@mcp.tool()
-async def generate_hyperlink_map(
-    markers: Annotated[
-        list[Marker],
-        Field(description="Locations to pin. At least one required, and at least one marker must "
-                           "have 'link' set (its official website URL) — otherwise use generate_markers_map instead."),
-    ],
-    place: Annotated[
-        str | None,
-        Field(description="Optional: place to center the map on. If omitted, the center is computed automatically from the markers."),
-    ] = None,
-    ctx: Context = None,
-) -> list:
-    """Generate a map with pinned locations whose website links are clickable in the resulting map link.
-    Requires at least one marker to have 'link' set — use generate_markers_map if none do.
-
-    Example: generate_hyperlink_map(markers=[{"label": "Tokyo Tower", "link": "https://www.tokyotower.co.jp/"}])
-    """
-    if not markers:
-        raise ValueError("'markers' must contain at least one marker.")
-    if not any(m.link for m in markers):
-        raise ValueError(
-            "generate_hyperlink_map requires at least one marker with 'link' set. "
-            "Use generate_markers_map instead if no marker has a link."
-        )
-    label = place or "_".join(m.label for m in markers)[:40]
-    body: dict = {"markers": [m.model_dump(exclude_none=True) for m in markers]}
     if place:
         body["place"] = place
     return await _generate_map_common(body, ctx, label=label)

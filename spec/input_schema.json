@@ -1,11 +1,11 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "MapNetwork MCP - 入力JSON仕様",
-  "description": "mapnetwork_mcp/server.py で定義されている6つのMCPツールの入力パラメータ仕様。各属性の型・デフォルト値・設定可能値（enum）・制約を示す。",
+  "description": "mapnetwork_mcp/server.py で定義されている5つのMCPツールの入力パラメータ仕様。各属性の型・デフォルト値・設定可能値（enum）・制約を示す。",
   "definitions": {
     "Marker": {
       "type": "object",
-      "description": "generate_markers_map/generate_hyperlink_map共通。地図上にピン留めする地点。labelは必須、linkは任意で公式サイトURLを付けられる。generate_markers_mapはlink無しのマーカーが混在してもよい（むしろ通常はこちら）。generate_hyperlink_mapは、markers全体のうち少なくとも1件がlinkを持つことをツール側で検証する（ツールごとに別モデルは存在しない）",
+      "description": "generate_markers_mapが使う、地図上にピン留めする地点。labelは必須、linkは任意で公式サイトURLを付けられる（バックエンド側がPlaces APIで自動補完する場合も多い）。link無しのマーカーが混在してもよい（むしろ通常はこちら）。以前はgenerate_hyperlink_mapという別ツールが同じMarker型を使い、markers全体のうち少なくとも1件がlinkを持つことを追加要求していたが、Places APIによるlink自動補完でgenerate_markers_mapとの差が実質無くなったため廃止された",
       "properties": {
         "label": { "type": "string", "description": "地名（ジオコーディング・表示用）" },
         "link": { "type": ["string", "null"], "default": null, "description": "その地点の公式サイトURL（既知の場合のみ設定）" }
@@ -36,7 +36,7 @@
       "example": { "place": "Tokyo Station" }
     },
     "generate_markers_map": {
-      "description": "複数の地点をピン留めした地図画像を生成する。各地点は任意でlinkを持てる（generate_hyperlink_mapと違い必須ではない、一部/全部/どれもlinkを持たなくてもよい）。常にデフォルトのカラーテーマ・PNG形式でダウンロードする",
+      "description": "複数の地点をピン留めした地図画像を生成する。各地点は任意でlinkを持てる（一部/全部/どれもlinkを持たなくてもよい）。常にデフォルトのカラーテーマ・PNG形式でダウンロードする",
       "type": "object",
       "properties": {
         "markers": {
@@ -50,10 +50,10 @@
       "required": ["markers"],
       "constraints": [
         "markersは1件以上必須（link有無は問わない。1件もlinkを持たないのが通常のケース）",
-        "markersのいずれかがlinkを持つ場合、成功レスポンスは編集用リンクの代わりに閲覧専用（lock）のhyperlink Mapリンクを返す（generate_hyperlink_mapを呼んだ場合と同じ挙動。判定はどのツールを呼んだかではなく実データによる）",
+        "markersのいずれかがlink（明示指定またはバックエンド側のPlaces API自動補完）を持つ場合、成功レスポンスの'Open in editor'リンクに&lock=trueが付き、閲覧専用モードでそのmarkerがクリック可能になる（判定はどのツールを呼んだかではなく実データによる）",
         "configDict.nameにはサーバー側がplace（未指定ならmarkersのlabelを連結した文字列）を自動設定する"
       ],
-      "example": { "markers": [{ "label": "Tokyo Tower" }, { "label": "Zojoji Temple" }] }
+      "example": { "markers": [{ "label": "Tokyo Tower", "link": "https://www.tokyotower.co.jp/" }, { "label": "Zojoji Temple" }] }
     },
     "generate_route_map": {
       "description": "2地点間の徒歩/車ルートを計算し、それを重ねた地図画像を1回の呼び出しで生成する。ルート探索と地図生成が別ツールに分かれていた旧設計（compute_route→generate_route_mapの2段階）は、MCPホスト側にとって難易度が高すぎたため統合された。ルートの両端点は地図上に自動でピン留めされる。常にデフォルトのカラーテーマ・PNG形式でダウンロードする",
@@ -76,26 +76,6 @@
         "configDict.nameにはサーバー側がplace（未指定なら'route'固定文字列）を自動設定する"
       ],
       "example": { "from": "Tokyo Station", "to": "Tokyo Tower", "mode": "walking" }
-    },
-    "generate_hyperlink_map": {
-      "description": "generate_markers_mapと同一のツール（markers/placeの形も同じ、Marker定義も共通）だが、markersのうち少なくとも1件がlinkを持つことを追加で要求する。全markerがlink無しだとエラーになる。linkを持つ地点があると、生成結果は編集用リンクの代わりに閲覧専用（lock）のhyperlink Mapリンクを返す。常にデフォルトのカラーテーマ・PNG形式でダウンロードする",
-      "type": "object",
-      "properties": {
-        "markers": {
-          "type": "array",
-          "description": "地図上にピン留めする地点リスト（1件以上必須、かつ少なくとも1件はlinkを持つ必要がある）",
-          "items": { "$ref": "#/definitions/Marker" },
-          "minItems": 1
-        },
-        "place": { "type": ["string", "null"], "default": null, "description": "地図の中心とする地名。未指定ならmarkersの座標群から自動計算される" }
-      },
-      "required": ["markers"],
-      "constraints": [
-        "markersは1件以上必須",
-        "markersのうち少なくとも1件はlinkを持つ必要がある（ツール側でバリデーション、Marker定義自体はlinkを任意としている）。持たない場合はエラーになり、generate_markers_mapの使用を促すメッセージが返る",
-        "configDict.nameにはサーバー側がplace（未指定ならmarkersのlabelを連結した文字列）を自動設定する"
-      ],
-      "example": { "markers": [{ "label": "Zojoji Temple" }, { "label": "Tokyo Tower", "link": "https://www.tokyotower.co.jp/" }] }
     },
     "check_map_status": {
       "description": "generate_*ツールが未完了（pending）を返した場合のジョブをポーリングし、完了していればデフォルトのカラーテーマ・PNG形式でダウンロードする",
