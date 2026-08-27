@@ -82,7 +82,10 @@ mcp = FastMCP(
         "- **place/label**: `place`, a marker's `label`, and route's `from`/`to` must each be a "
         "place name specific enough for the server to geocode it to a single, unambiguous "
         "location (e.g. a full venue or station name, not a vague or generic term like "
-        "\"the station\" or \"a nearby cafe\")."
+        "\"the station\" or \"a nearby cafe\").\n"
+        "- **name**: every generate_* tool also accepts an optional `name` to set the map's "
+        "display name explicitly. If omitted, the server derives one automatically from "
+        "place/markers/route."
     ),
 )
 
@@ -172,8 +175,9 @@ def _still_in_progress_result(data_key: str) -> list:
 async def _generate_map_common(body: dict, ctx: Context | None, label: str | None = None) -> list:
     """3つのgenerate_*ツール共通のenqueue→poll→download→結果構築フロー。
     downloadUrl/editorUrlは/statusレスポンスに含まれるものをそのまま使う(自前で組み立てない)。
-    labelはダウンロードファイル名の元にのみ使う(バックエンド側もplace/markers/routeから
-    同じ表示名をconfigDict.nameとして独自に導出するため、bodyには含めない)。
+    labelはダウンロードファイル名の元にのみ使う(bodyには含めない)。呼び出し元がname引数を
+    明示していればbody["name"]としてバックエンドへ渡り、そのままconfigDict.nameになる。
+    省略時はバックエンド側がplace/markers/routeから同じ表示名を自動で導出する。
     常にformat="png"・デフォルトcolor_setでダウンロードする(別の見た目が欲しければ
     redownload_mapで取り直す)。"""
     async with httpx.AsyncClient() as client:
@@ -220,6 +224,10 @@ async def _generate_map_common(body: dict, ctx: Context | None, label: str | Non
 @mcp.tool()
 async def generate_map(
     place: Annotated[str, Field(description="Place name to center the map on (geocoded server-side).")],
+    name: Annotated[
+        str | None,
+        Field(description="Optional: display name for the map. If omitted, the server derives one automatically from place."),
+    ] = None,
     ctx: Context = None,
 ) -> list:
     """Generate a styled map centered on a single place.
@@ -227,6 +235,8 @@ async def generate_map(
     Example: generate_map(place="Tokyo Station")
     """
     body: dict = {"place": place}
+    if name:
+        body["name"] = name
     return await _generate_map_common(body, ctx, label=place)
 
 
@@ -243,6 +253,10 @@ async def generate_markers_map(
         str | None,
         Field(description="Optional: place to center the map on. If omitted, the center is computed automatically from the markers."),
     ] = None,
+    name: Annotated[
+        str | None,
+        Field(description="Optional: display name for the map. If omitted, the server derives one automatically from place/markers."),
+    ] = None,
     ctx: Context = None,
 ) -> list:
     """Generate a map with multiple pinned locations.
@@ -255,6 +269,8 @@ async def generate_markers_map(
     body: dict = {"markers": [m.model_dump(exclude_none=True) for m in markers]}
     if place:
         body["place"] = place
+    if name:
+        body["name"] = name
     return await _generate_map_common(body, ctx, label=label)
 
 
@@ -274,6 +290,10 @@ async def generate_route_map(
         str | None,
         Field(description="Optional: place to center the map on. If omitted, the center is computed automatically from the route."),
     ] = None,
+    name: Annotated[
+        str | None,
+        Field(description="Optional: display name for the map. If omitted, the server derives one automatically from place/route."),
+    ] = None,
     ctx: Context = None,
 ) -> list:
     """Compute a walking/driving route between two places and generate a map with it overlaid.
@@ -289,6 +309,8 @@ async def generate_route_map(
     body: dict = {"route": {"from": {"label": from_}, "to": {"label": to}, "mode": mode}}
     if place:
         body["place"] = place
+    if name:
+        body["name"] = name
     return await _generate_map_common(body, ctx, label=label)
 
 

@@ -29,10 +29,11 @@
       "description": "単一の地名を中心にしたスタイル付き地図画像を生成し、Downloadsフォルダに保存する。地図サイズ・取得レイヤーは座標から自動決定される。常にデフォルトのカラーテーマ・PNG形式でダウンロードする（別の見た目が欲しければredownload_mapで取り直す）",
       "type": "object",
       "properties": {
-        "place": { "type": "string", "description": "地図の中心とする地名（サーバー側でジオコーディング）", "required": true }
+        "place": { "type": "string", "description": "地図の中心とする地名（サーバー側でジオコーディング）", "required": true },
+        "name": { "type": ["string", "null"], "default": null, "description": "地図の表示名（任意）。未指定ならバックエンド側がplaceの値をそのまま使う" }
       },
       "required": ["place"],
-      "constraints": ["configDict.nameにはサーバー側がplaceの値をそのまま設定する（このツールにname引数はない）"],
+      "constraints": ["nameを指定すればそのままconfigDict.nameに使われる。未指定ならバックエンド側がplaceの値をそのまま設定する"],
       "example": { "place": "Tokyo Station" }
     },
     "generate_markers_map": {
@@ -45,13 +46,14 @@
           "items": { "$ref": "#/definitions/Marker" },
           "minItems": 1
         },
-        "place": { "type": ["string", "null"], "default": null, "description": "地図の中心とする地名。未指定ならmarkersの座標群から自動計算される" }
+        "place": { "type": ["string", "null"], "default": null, "description": "地図の中心とする地名。未指定ならmarkersの座標群から自動計算される" },
+        "name": { "type": ["string", "null"], "default": null, "description": "地図の表示名（任意）。未指定ならバックエンド側がplace/markersから自動導出する" }
       },
       "required": ["markers"],
       "constraints": [
         "markersは1件以上必須（link有無は問わない。1件もlinkを持たないのが通常のケース）",
         "markersのいずれかがlink（明示指定またはバックエンド側のPlaces API自動補完）を持つ場合、成功レスポンスの'Open in editor'リンクに&lock=trueが付き、閲覧専用モードでそのmarkerがクリック可能になる（判定はどのツールを呼んだかではなく実データによる）",
-        "configDict.nameにはサーバー側がplace（未指定ならmarkersのlabelを連結した文字列）を自動設定する"
+        "nameを指定すればそのままconfigDict.nameに使われる。未指定ならバックエンド側がplace（未指定ならmarkersのlabelを連結した文字列）を自動設定する"
       ],
       "example": { "markers": [{ "label": "Tokyo Tower", "link": "https://www.tokyotower.co.jp/" }, { "label": "Zojoji Temple" }] }
     },
@@ -66,14 +68,15 @@
           "default": "walking",
           "description": "移動手段"
         },
-        "place": { "type": ["string", "null"], "default": null, "description": "地図の中心とする地名。未指定ならルートの座標群から自動計算される" }
+        "place": { "type": ["string", "null"], "default": null, "description": "地図の中心とする地名。未指定ならルートの座標群から自動計算される" },
+        "name": { "type": ["string", "null"], "default": null, "description": "地図の表示名（任意）。未指定ならバックエンド側がplace/routeから自動導出する" }
       },
       "required": ["from", "to"],
       "constraints": [
         "from/toは地名の文字列のみ。座標を自分で計算・推測して渡してはならない（サーバー側でジオコーディング・ルート探索の両方を行う）",
         "ルートの両端点は自動でピン留めされるため、別途generate_markers_mapを呼ぶ必要はない",
         "ルート探索はバックエンドのワーカー内(地図生成と同じジョブ)で、地図生成用に取得した道路データをそのまま再利用して行われる（別エンドポイントでの事前ルート探索は廃止済み、道路データの二重取得を避けるため）。そのため「ルートが見つからない」等の失敗は、呼び出し時点では分からず、地図生成ジョブ自体の失敗（dataKeyのstatusがfailed）として遅れて判明する",
-        "configDict.nameにはサーバー側がplace（未指定なら'route'固定文字列）を自動設定する"
+        "nameを指定すればそのままconfigDict.nameに使われる。未指定ならバックエンド側がplace（未指定なら'route'固定文字列）を自動設定する"
       ],
       "example": { "from": "Tokyo Station", "to": "Tokyo Tower", "mode": "walking" }
     },
