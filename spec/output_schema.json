@@ -54,7 +54,7 @@
     },
     "PendingResult": {
       "type": "object",
-      "description": "generate_*が内部ポーリング予算内に完了しなかった場合、またはcheck_map_statusで確認したがまだreadyでない場合",
+      "description": "generate_*・download_mapともに、内部ポーリング予算(POLL_BUDGET_SEC=40秒)内に完了しなかった場合に返る",
       "properties": {
         "isError": { "const": false },
         "structuredContent": { "const": null },
@@ -67,7 +67,7 @@
             "properties": {
               "text": {
                 "type": "string",
-                "description": "'Map generation is still in progress (dataKey=<dataKey>). ... call check_map_status(data_key=\\'<dataKey>\\') to check again. Do NOT call the generate_* tool again ...'"
+                "description": "'Map generation is still in progress (dataKey=<dataKey>). ... Call download_map(data_key=\\'<dataKey>\\') again to check and download once ready. Do NOT call the generate_* tool again ...'"
               }
             }
           }
@@ -77,7 +77,7 @@
     },
     "MapSuccessResult": {
       "type": "object",
-      "description": "地図が生成/取得できた場合の共通の成功形。generate_*系3ツール・check_map_status・redownload_mapすべてがこの形で返す",
+      "description": "地図が生成/取得できた場合の共通の成功形。generate_*系3ツール・download_map・redownload_mapすべてがこの形で返す",
       "properties": {
         "isError": { "const": false },
         "structuredContent": { "const": null },
@@ -92,7 +92,7 @@
               "properties": {
                 "text": {
                   "type": "string",
-                  "description": "'Map saved: <ローカル保存パス>\\ndataKey: <dataKey>\\n\\nDownload: .../download?dataKey=...\\nOpen in editor: .../generate?dataKey=...[&lock=true]\\n\\nTip: call redownload_map(...) ...' の形式（generate_*/check_map_statusの場合）。&lock=trueはlinkを持つmarkerが1件でもある場合にのみ付く。redownload_mapのみ形式が異なる（下記参照）"
+                  "description": "'Map saved: <ローカル保存パス>\\ndataKey: <dataKey>\\n\\nDownload: .../download?dataKey=...\\nOpen in editor: .../generate?dataKey=...[&lock=true]\\n\\nTip: call redownload_map(...) ...' の形式（generate_*/download_mapの場合）。&lock=trueはlinkを持つmarkerが1件でもある場合にのみ付く。redownload_mapのみ形式が異なる（下記参照）"
                 }
               }
             }
@@ -147,7 +147,7 @@
       "notes": [
         "compute_routeという別ツールは存在せず（廃止済み）、専用のルート探索エンドポイントも存在しない（こちらも廃止済み）。generate_route_mapは{\"from\":{\"label\":...}, \"to\":{\"label\":...}, \"mode\":...}をそのままバックエンドの/requestのrouteフィールドに詰めて1回だけ送るだけで、ジオコード・ルート探索・地図生成は全てバックエンドのワーカー内(build_map_data)で行われる。ルート探索は地図生成用に取得した道路データをそのまま再利用するため、道路網の二重取得が発生しない。",
         "from/toはmarkerとして自動でピン留めされるが、linkを持たせる手段は無い。そのため生成データにlinkを持つエントリは発生せず、成功時のOpen in editorリンクに'&lock=true'は付かない。",
-        "ルート探索がバックエンド内(ワーカー)で行われるため、「ルートが見つからない」等の失敗はgenerate_route_map呼び出し時点では判明せず、他のgenerate_*ツールと同じ一般的な地図生成失敗（'Map generation failed (dataKey=...). Try a different location.'）として現れる。INITIAL_WAIT_SEC(40秒)以内に失敗が判明すればそのままエラーとして返るが、それより時間がかかる場合は一旦pendingが返り、check_map_status経由で最終的に失敗が判明する。"
+        "ルート探索がバックエンド内(ワーカー)で行われるため、「ルートが見つからない」等の失敗はgenerate_route_map呼び出し時点では判明せず、他のgenerate_*ツールと同じ一般的な地図生成失敗（'Map generation failed (dataKey=...). Try a different location.'）として現れる。POLL_BUDGET_SEC(40秒)以内に失敗が判明すればそのままエラーとして返るが、それより時間がかかる場合は一旦pendingが返り、download_map経由で最終的に失敗が判明する。"
       ],
       "example_error_texts": [
         "Error executing tool generate_route_map: All connection attempts failed",
@@ -156,7 +156,7 @@
         "Error executing tool generate_route_map: 1 validation error for generate_route_mapArguments\nmode\n  Input should be 'walking' or 'driving' [type=literal_error, input_value='flying', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/literal_error"
       ]
     },
-    "check_map_status": {
+    "download_map": {
       "returns": {
         "success": { "$ref": "#/definitions/MapSuccessResult" },
         "pending": { "$ref": "#/definitions/PendingResult" },
@@ -164,8 +164,8 @@
       },
       "notes": [
         "successの場合、_make_filename(data_key, \"png\")でファイル名を作るため、保存パスのslugにはdataKeyがそのまま使われる（generate_*の成功時はplace/markerラベル由来のslugになるのと異なる）。",
-        "Open in editorリンクへの&lock=true付与は、check_map_status呼び出し時点で実データのplaceDictを再取得して判定する（元のgenerate_*ツール呼び出しの引数には依存しない）。",
-        "呼び出しごとにCHECK_THROTTLE_SEC(5秒)のスリープが必ず入るため、pending応答であっても即座には返らない。"
+        "Open in editorリンクへの&lock=true付与は、download_map呼び出し時点で実データのplaceDictを再取得して判定する（元のgenerate_*ツール呼び出しの引数には依存しない）。",
+        "呼び出し側で待つ必要はない。_poll_with_budget(sleep_first=False)により、呼び出された時点でまず即座に/statusを1回確認し（既に完了していれば待たずにそのまま画像を返す）、未完了ならPOLL_INTERVAL_SEC(10秒)間隔でPOLL_BUDGET_SEC(40秒)まで内部でポーリングを続ける。それでも完了しなければpendingを返す（generate_*と異なりsleep_firstがFalseなので、40秒間隔で最大5回/statusを叩く計算になる）。呼び出し間隔の連打対策(旧CHECK_THROTTLE_SEC)は廃止された — 1回の呼び出しが最短でも次のready/failed確定か40秒経過までブロックするため、連打しても機械的に無駄が生じない。"
       ]
     },
     "redownload_map": {

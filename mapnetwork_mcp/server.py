@@ -19,16 +19,10 @@ POLL_INTERVAL_SEC = 10.0
 MAX_WAIT_SEC = 600
 # MCPクライアントによっては、report_progressで進捗通知を送ってもtools/call自体の
 # クライアント側タイムアウトを延長してくれない(60秒固定のクライアントで実測確認済み)。
-# そのため generate_* は内部ポーリングをこの秒数までに打ち切り、まだ終わっていなければ
-# dataKeyを返してcheck_map_statusでの確認をモデルに促す。60秒に対して十分な余裕を残す値にする。
-INITIAL_WAIT_SEC = 40.0
-# check_map_statusをモデルが連打しても機械的に間隔が空くようにする最低間隔。
-# dataKeyごとの前回チェック時刻(_last_check_time)からの経過時間がこれ未満の場合のみ、
-# 不足分だけ待つ(モデルが指示通り既にこれ以上待っていれば追加待機はしない)
-CHECK_THROTTLE_SEC = 5.0
-
-# dataKeyごとの前回check_map_status呼び出し時刻(time.monotonic())
-_last_check_time: dict[str, float] = {}
+# そのため generate_*・download_mapは1回の呼び出しで内部ポーリングをこの秒数までに
+# 打ち切り、まだ終わっていなければdataKeyを返してdownload_mapを再度呼ぶようモデルに
+# 促す。60秒に対して十分な余裕を残す値にする(両ツールで共用する1回あたりの待機予算)。
+POLL_BUDGET_SEC = 40.0
 
 
 # extra="forbid": 未知のキー(例えばmarkerの'label'と紛れて'place'を書いてしまう等)を
@@ -69,10 +63,11 @@ mcp = FastMCP(
         "re-download without regenerating' below to change the theme or format without regenerating.\n\n"
         "## If generation is still in progress\n"
         "For busy areas, any generate_* tool may return before the map is ready, with a `dataKey` "
-        "and a message asking you to check back. In that case, wait about 10-20 seconds and "
-        "call `check_map_status(data_key=...)` — do not call the generate_* tool again for the same "
-        "request, that only starts a redundant duplicate job. Repeat `check_map_status` "
-        "(with the same wait between calls) until it returns the image.\n\n"
+        "and a message asking you to check back. In that case, call `download_map(data_key=...)` — "
+        "it waits internally and returns the image as soon as it's ready, or asks you to call it "
+        "again if it's still not done. Do not call the generate_* tool again for the same "
+        "request, that only starts a redundant duplicate job. Just repeat `download_map` "
+        "with the same `dataKey` until it returns the image.\n\n"
         "## Important: re-download without regenerating\n"
         "After generating a map, the tool returns a `dataKey`. "
         "You can call `redownload_map` with that `dataKey` to get the same map in a different "
@@ -116,28 +111,37 @@ async def _download(client: httpx.AsyncClient, data_key: str, format: str,
 
 async def _poll_with_budget(
     client: httpx.AsyncClient, data_key: str, budget_sec: float, ctx: Context | None,
+    sleep_first: bool,
 ) -> dict:
     """dataKeyの状態をPOLL_INTERVAL_SEC間隔でbudget_sec以内までポーリングする。
     "ready"/"failed"になればその時点の/statusレスポンス全体(downloadUrl/editorUrlを含む)を
     返す。budget_sec内に決着しなければ{"status": "pending"}を返す(例外は投げない、
-    呼び出し側で分岐する)。"""
+    呼び出し側で分岐する)。
+    sleep_first=True: 最初のチェック前にPOLL_INTERVAL_SEC待つ(generate_*用 — enqueueした
+    直後なので、すぐ完了している見込みは薄い)。
+    sleep_first=False: 即座に1回目のチェックを行う(download_map用 — 呼ばれた時点で既に
+    完了している可能性があるため、無駄な初回待ちを避ける)。"""
     if ctx is not None:
         await ctx.report_progress(0, budget_sec, "Map generation queued...")
     elapsed = 0.0
-    while elapsed < budget_sec:
+    if sleep_first:
         await asyncio.sleep(POLL_INTERVAL_SEC)
         elapsed += POLL_INTERVAL_SEC
+    while True:
         status_resp = await client.get(
             f"{BASE_URL}/status", params={"dataKey": data_key}, timeout=10
         )
         status_json = status_resp.json()
         if status_json.get("status") in ("ready", "failed"):
             return status_json
+        if elapsed >= budget_sec:
+            return {"status": "pending"}
         if ctx is not None:
             await ctx.report_progress(
                 elapsed, budget_sec, f"Map generation in progress... ({elapsed:.0f}s elapsed)"
             )
-    return {"status": "pending"}
+        await asyncio.sleep(POLL_INTERVAL_SEC)
+        elapsed += POLL_INTERVAL_SEC
 
 
 def _build_success_result(image_bytes: bytes, out_path: Path, data_key: str, download_url: str, editor_url: str) -> list:
@@ -158,8 +162,8 @@ def _build_success_result(image_bytes: bytes, out_path: Path, data_key: str, dow
 def _still_in_progress_result(data_key: str) -> list:
     return [(
         f"Map generation is still in progress (dataKey={data_key}). This can take a few "
-        f"minutes for busy areas. Wait about {POLL_INTERVAL_SEC:.0f} seconds, then call "
-        f"check_map_status(data_key='{data_key}') to check again. "
+        f"minutes for busy areas. Call download_map(data_key='{data_key}') again to check and "
+        "download once ready. "
         "Do NOT call the generate_* tool again for the same request — that starts a redundant "
         "duplicate job and wastes time."
     )]
@@ -183,12 +187,13 @@ async def _generate_map_common(body: dict, ctx: Context | None, label: str | Non
             raise RuntimeError(f"Request rejected ({resp.status_code}): {detail}")
         data_key = resp.json()["dataKey"]
 
-        # 2. Poll, but only up to INITIAL_WAIT_SEC (安全のためMCPクライアントの典型的な
+        # 2. Poll, but only up to POLL_BUDGET_SEC (安全のためMCPクライアントの典型的な
         # 60秒タイムアウトより十分短くしてある)。多くの地図生成はこの範囲で終わるため、
         # その場合はこの1回の呼び出しだけで完結する。間に合わなければ、ここで打ち切って
-        # dataKeyを返し、check_map_statusでの確認をモデルに促す(生成自体はバックエンドで
-        # 継続しているので、ここで諦めても失敗にはならない)。
-        status_json = await _poll_with_budget(client, data_key, INITIAL_WAIT_SEC, ctx)
+        # dataKeyを返し、download_mapでの確認をモデルに促す(生成自体はバックエンドで
+        # 継続しているので、ここで諦めても失敗にはならない)。enqueueした直後なので
+        # 最初のチェック前にも1回分待つ(sleep_first=True)。
+        status_json = await _poll_with_budget(client, data_key, POLL_BUDGET_SEC, ctx, sleep_first=True)
         status = status_json.get("status")
 
         if status == "failed":
@@ -288,31 +293,26 @@ async def generate_route_map(
 
 
 # ---------------------------------------------------------------------------
-# Tool: check_map_status
+# Tool: download_map
 # ---------------------------------------------------------------------------
 
 @mcp.tool()
-async def check_map_status(
+async def download_map(
     data_key: Annotated[
         str,
         Field(description="The dataKey returned by a generate_* call that reported it was still in progress."),
     ],
     ctx: Context = None,
 ) -> list:
-    """Poll a pending generate_* job and download it once ready. Wait ~10s between calls.
+    """Check a pending generate_* job and download it once ready. If it's already done, returns
+    the image immediately; otherwise waits internally (checking periodically) before returning —
+    no need to wait between calls yourself. If still not ready when it returns, call it again
+    with the same dataKey.
 
-    Example: check_map_status(data_key="20260618aBcDeFgHiJ")
+    Example: download_map(data_key="20260618aBcDeFgHiJ")
     """
     async with httpx.AsyncClient() as client:
-        # 連打対策: このdataKeyを前回チェックしてからCHECK_THROTTLE_SEC未満しか
-        # 経っていなければ、不足分だけ待つ(モデルが指示通り既に十分待っていれば
-        # 追加待機はしない)
-        elapsed = time.monotonic() - _last_check_time.get(data_key, 0.0)
-        if elapsed < CHECK_THROTTLE_SEC:
-            await asyncio.sleep(CHECK_THROTTLE_SEC - elapsed)
-        _last_check_time[data_key] = time.monotonic()
-        status_resp = await client.get(f"{BASE_URL}/status", params={"dataKey": data_key}, timeout=10)
-        status_json = status_resp.json()
+        status_json = await _poll_with_budget(client, data_key, POLL_BUDGET_SEC, ctx, sleep_first=False)
         status = status_json.get("status")
         if status == "failed":
             raise RuntimeError(
@@ -320,8 +320,6 @@ async def check_map_status(
                 "Try a different location."
             )
         if status != "ready":
-            if ctx is not None:
-                await ctx.report_progress(0, 1, "Map generation still in progress...")
             return _still_in_progress_result(data_key)
 
         image_bytes = await _download(client, data_key, "png", None)

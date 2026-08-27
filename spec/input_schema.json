@@ -77,8 +77,8 @@
       ],
       "example": { "from": "Tokyo Station", "to": "Tokyo Tower", "mode": "walking" }
     },
-    "check_map_status": {
-      "description": "generate_*ツールが未完了（pending）を返した場合のジョブをポーリングし、完了していればデフォルトのカラーテーマ・PNG形式でダウンロードする",
+    "download_map": {
+      "description": "generate_*ツールが未完了（pending）を返した場合のジョブを確認し、完了していればデフォルトのカラーテーマ・PNG形式でダウンロードする。まだ完了していなければ内部で待機してから再確認するため、呼び出し側で待つ必要はない",
       "type": "object",
       "properties": {
         "data_key": { "type": "string", "description": "generate_*ツールが返したdataKey", "required": true }

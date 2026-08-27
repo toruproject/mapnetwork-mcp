@@ -36,8 +36,8 @@
       "description": "Compute a walking or driving route between two places and generate a map with it overlaid"
     },
     {
-      "name": "check_map_status",
-      "description": "Poll a pending map generation job and download it once ready"
+      "name": "download_map",
+      "description": "Check a pending map generation job and download it once ready"
     },
     {
       "name": "redownload_map",
