@@ -4,10 +4,10 @@ MCP server for [MapNetwork](https://mapnetwork.app) — generate styled map imag
 
 ## Features
 
-- Generate maps from a place name, coordinates, or a list of markers
+- Generate maps from a place name, a list of markers, or a walking/driving route
 - 11 color themes (white, darkBlue, darkGreen, popArt, lightBlue, lightGreen, beige, magenta, gray, black, brawn)
-- Overlay walking / driving routes on the map
 - PNG or SVG output, saved to your Downloads folder
+- Slow-to-generate maps are handled automatically — `generate_*` tools poll internally, and `download_map` can pick up a job later if needed
 - Re-download a previously generated map in a different theme or format without regenerating
 - Open any generated map in the MapNetwork web editor for manual customization
 
@@ -48,7 +48,7 @@ Add the following to your `claude_desktop_config.json`:
     "mapnetwork": {
       "command": "uvx",
       "args": ["mapnetwork-mcp"],
-      "alwaysAllow": ["generate_map", "compute_route", "redownload_map"]
+      "alwaysAllow": ["generate_map", "generate_markers_map", "generate_route_map", "download_map", "redownload_map"]
     }
   }
 }
@@ -86,25 +86,25 @@ The key difference from this local server is how you receive the generated map i
 
 | Tool | Description |
 |---|---|
-| `generate_map` | Generate a styled map image for a location and save it to Downloads |
-| `compute_route` | Compute a walking or driving route between two locations |
-| `redownload_map` | Re-download a previously generated map in a different color theme or format |
+| `generate_map` | Generate a styled map image centered on a single place and save it to Downloads |
+| `generate_markers_map` | Generate a map with multiple pinned locations |
+| `generate_route_map` | Compute a walking or driving route between two places and generate a map with it overlaid |
+| `download_map` | Check a pending `generate_*` job and download it once ready |
+| `redownload_map` | Re-download a previously generated map in a different color theme or format — instant, no regeneration |
 
 ## Example prompts
 
 **Japanese**
-- "渋谷駅周辺の地図を作って"
+- "東京タワー周辺の地図を作って"
+- "上野駅が最寄りの美術館・博物館を地図にして"
 - "赤坂駅から赤坂氷川神社までの徒歩ルートを地図にして"
-- "東京駅・日本橋駅・京橋駅を1枚の地図に表示して"
-- "日比谷公園の1キロ四方の地図を出して"
 - "その地図を darkBlue テーマでSVG画像で出し直して"
 - "生成した地図の編集用リンクをください"
 
 **English**
-- "Generate a map around Shibuya Station"
+- "Generate a map around Tokyo Tower"
+- "Show a map of the museums near Ueno Station"
 - "Show a walking route from Akasaka Station to Akasaka Hikawa Shrine on a map"
-- "Put Tokyo Station, Nihonbashi Station, and Kyobashi Station on a single map"
-- "Show a 1km square map of Hibiya Park"
 - "Redownload that map as an SVG in the darkBlue theme"
 - "Give me a link to edit the generated map"
 
