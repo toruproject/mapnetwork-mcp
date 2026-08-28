@@ -6,12 +6,12 @@
     "url": "https://github.com/toruproject/mapnetwork-mcp",
     "source": "github"
   },
-  "version": "5.0.0",
+  "version": "6.0.0",
   "packages": [
     {
       "registryType": "pypi",
       "identifier": "mapnetwork-mcp",
-      "version": "5.0.0",
+      "version": "6.0.0",
       "transport": {
         "type": "stdio"
       }
