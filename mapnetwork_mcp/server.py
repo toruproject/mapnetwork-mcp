@@ -162,6 +162,17 @@ def _build_success_result(image_bytes: bytes, out_path: Path, data_key: str, dow
     ]
 
 
+def _failed_message(data_key: str, status_json: dict) -> str:
+    """/statusが返す"failed"レスポンスからメッセージを組み立てる。バックエンド(worker.py)が
+    失敗理由を"error"フィールドに書き込めていればそれを含める(具体的な原因をClaudeが
+    ユーザーに伝えたり、再試行の判断材料にできるようにするため)。無ければ(古いバージョンの
+    バックエンド、書き込み自体が失敗した等)従来通りの汎用メッセージにフォールバックする。"""
+    reason = status_json.get("error")
+    if reason:
+        return f"Map generation failed (dataKey={data_key}): {reason}"
+    return f"Map generation failed (dataKey={data_key}). Try a different location."
+
+
 def _still_in_progress_result(data_key: str) -> list:
     return [(
         f"Map generation is still in progress (dataKey={data_key}). This can take a few "
@@ -201,10 +212,7 @@ async def _generate_map_common(body: dict, ctx: Context | None, label: str | Non
         status = status_json.get("status")
 
         if status == "failed":
-            raise RuntimeError(
-                f"Map generation failed (dataKey={data_key}). "
-                "Try a different location."
-            )
+            raise RuntimeError(_failed_message(data_key, status_json))
         if status == "pending":
             return _still_in_progress_result(data_key)
 
@@ -337,10 +345,7 @@ async def download_map(
         status_json = await _poll_with_budget(client, data_key, POLL_BUDGET_SEC, ctx, sleep_first=False)
         status = status_json.get("status")
         if status == "failed":
-            raise RuntimeError(
-                f"Map generation failed (dataKey={data_key}). "
-                "Try a different location."
-            )
+            raise RuntimeError(_failed_message(data_key, status_json))
         if status != "ready":
             return _still_in_progress_result(data_key)
 
