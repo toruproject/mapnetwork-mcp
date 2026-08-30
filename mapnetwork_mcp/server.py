@@ -186,9 +186,11 @@ def _still_in_progress_result(data_key: str) -> list:
 async def _generate_map_common(body: dict, ctx: Context | None, label: str | None = None) -> list:
     """3つのgenerate_*ツール共通のenqueue→poll→download→結果構築フロー。
     downloadUrl/editorUrlは/statusレスポンスに含まれるものをそのまま使う(自前で組み立てない)。
-    labelはダウンロードファイル名の元にのみ使う(bodyには含めない)。呼び出し元がname引数を
+    ダウンロードファイル名は、/statusレスポンスの"name"(バックエンドが決めたconfigDict.name。
+    quereq.py validate_and_prepare/_build_name参照)を優先して使う。呼び出し元がname引数を
     明示していればbody["name"]としてバックエンドへ渡り、そのままconfigDict.nameになる。
-    省略時はバックエンド側がplace/markers/routeから同じ表示名を自動で導出する。
+    省略時はバックエンド側がplace/markers/routeから同じ表示名を自動で導出する。labelは
+    /statusにnameが含まれない場合(古いバックエンド等)だけのフォールバックとして使う。
     常にformat="png"・デフォルトcolor_setでダウンロードする(別の見た目が欲しければ
     redownload_mapで取り直す)。"""
     async with httpx.AsyncClient() as client:
@@ -219,8 +221,9 @@ async def _generate_map_common(body: dict, ctx: Context | None, label: str | Non
         # 3. Download(downloadUrl/editorUrlは/statusレスポンスに既に含まれている)
         image_bytes = await _download(client, data_key, "png", None)
 
+    filename_base = status_json.get("name") or label or data_key
     return _build_success_result(
-        image_bytes, _make_filename(label or data_key, "png"), data_key,
+        image_bytes, _make_filename(filename_base, "png"), data_key,
         status_json["downloadUrl"], status_json["editorUrl"],
     )
 
@@ -351,8 +354,9 @@ async def download_map(
 
         image_bytes = await _download(client, data_key, "png", None)
 
+    filename_base = status_json.get("name") or data_key
     return _build_success_result(
-        image_bytes, _make_filename(data_key, "png"), data_key,
+        image_bytes, _make_filename(filename_base, "png"), data_key,
         status_json["downloadUrl"], status_json["editorUrl"],
     )
 
