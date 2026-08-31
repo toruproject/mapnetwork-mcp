@@ -1,6 +1,6 @@
 [project]
 name = "mapnetwork-mcp"
-version = "6.0.0"
+version = "6.1.0"
 description = "MCP server — generate styled map images via mapnetwork.app"
 readme = "README.md"
 license = "MIT"
