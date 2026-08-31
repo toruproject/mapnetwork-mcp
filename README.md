@@ -5,7 +5,7 @@ MCP server for [MapNetwork](https://mapnetwork.app) — generate styled map imag
 ## Features
 
 - Generate maps from a place name, a list of markers, or a walking/driving route
-- 11 color themes (white, darkBlue, darkGreen, popArt, lightBlue, lightGreen, beige, magenta, gray, black, brawn)
+- 11 color themes (white, darkBlue, darkGreen, popArt, lightBlue, lightGreen, beige, magenta, gray, black, brown)
 - PNG or SVG output, saved to your Downloads folder
 - Slow-to-generate maps are handled automatically — `generate_*` tools poll internally, and `download_map` can pick up a job later if needed
 - Re-download a previously generated map in a different theme or format without regenerating

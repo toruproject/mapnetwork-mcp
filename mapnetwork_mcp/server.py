@@ -74,7 +74,7 @@ mcp = FastMCP(
         "color theme or format (png/svg) — **no regeneration needed**. "
         "Use this when the user asks to change only the appearance after already generating the map. "
         "MapNetwork supports 11 color themes (white, darkBlue, darkGreen, popArt, lightBlue, "
-        "lightGreen, beige, magenta, gray, black, brawn).\n\n"
+        "lightGreen, beige, magenta, gray, black, brown).\n\n"
         "## Sharing the generated map\n"
         "Every successful result includes a Download link and an 'Open in editor' link — "
         "mention both to the user.\n\n"
