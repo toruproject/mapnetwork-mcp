@@ -1,12 +1,13 @@
 # mapnetwork-mcp
 
-MCP server for [MapNetwork](https://mapnetwork.app) — generate styled map images (PNG / SVG) for locations in Japan, directly from Claude or any MCP-compatible AI assistant.
+MCP server for [MapNetwork](https://mapnetwork.app) — turn places in Japan into styled, illustration-like map images (PNG / SVG), directly from Claude or any MCP-compatible AI assistant.
 
-> **Note:** The only country currently supported is **JP (Japan)**. Requests for places outside Japan are rejected.
+Maps are built from detailed OpenStreetMap data served by MapNetwork's own Overpass API for Japan, so coverage is currently limited to **Japan (country code JP)** — requests for places outside Japan return an error.
 
 ## Features
 
-- Generate maps from a place name, a list of markers, or a walking/driving route
+- Generate a map from a place name or a list of markers
+- Overlay a walking / driving route between two places
 - 11 color themes (white, darkBlue, darkGreen, popArt, lightBlue, lightGreen, beige, magenta, gray, black, brown)
 - PNG or SVG output, saved to your Downloads folder
 - Slow-to-generate maps are handled automatically — `generate_*` tools poll internally, and `download_map` can pick up a job later if needed

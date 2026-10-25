@@ -48,7 +48,8 @@ mcp = FastMCP(
     "MapNetwork",
     instructions=(
         "You have access to MapNetwork, which generates styled map images (PNG) "
-        "for any location on Earth.\n\n"
+        "for locations in Japan. The only country currently supported is JP (Japan); "
+        "requests for places outside Japan are rejected.\n\n"
         "## Key capabilities — pick the tool that matches what you need\n"
         "- **Single location**: `generate_map(place=...)` — centers a map on one place.\n"
         "- **Multiple pinned locations**: `generate_markers_map(markers=[{\"label\": ...}, ...])` — "
