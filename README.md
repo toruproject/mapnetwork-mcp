@@ -1,6 +1,8 @@
 # mapnetwork-mcp
 
-MCP server for [MapNetwork](https://mapnetwork.app) — generate styled map images (PNG / SVG) for any location on Earth, directly from Claude or any MCP-compatible AI assistant.
+MCP server for [MapNetwork](https://mapnetwork.app) — generate styled map images (PNG / SVG) for locations in Japan, directly from Claude or any MCP-compatible AI assistant.
+
+> **Note:** The only country currently supported is **JP (Japan)**. Requests for places outside Japan are rejected.
 
 ## Features
 
