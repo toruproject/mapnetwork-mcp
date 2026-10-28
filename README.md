@@ -13,6 +13,7 @@ Maps are built from detailed OpenStreetMap data served by MapNetwork's own Overp
 - Slow-to-generate maps are handled automatically — `generate_*` tools poll internally, and `download_map` can pick up a job later if needed
 - Re-download a previously generated map in a different theme or format without regenerating
 - Open any generated map in the MapNetwork web editor for manual customization
+- View any generated map in 3D — each result includes a link that draws a 3D rendering of the map in your own desktop browser and shows it as an image (not available on mobile devices)
 
 ## Example Usage
 
@@ -83,7 +84,7 @@ https://mapnetwork.app/mcp
 
 In Claude, go to **Settings** → **Connectors** → **Add custom connector** and register the URL above.
 
-The key difference from this local server is how you receive the generated map image. Since `mapnetwork-mcp` runs on your PC, it can save the generated image directly to your Downloads folder. The remote server can't do this — most AI assistants are unable to properly display or save tool-result images within the chat — so instead of image data, it returns a text response with a download link and a link to edit the map at [mapnetwork.app](https://mapnetwork.app). Open the links in a browser to view or save the image, or to edit the map.
+The key difference from this local server is how you receive the generated map image. Since `mapnetwork-mcp` runs on your PC, it can save the generated image directly to your Downloads folder. The remote server can't do this — most AI assistants are unable to properly display or save tool-result images within the chat — so instead of image data, it returns a text response with three links at [mapnetwork.app](https://mapnetwork.app): a download link for the PNG, a link to edit the map, and a link to view the map in 3D (the 3D rendering is drawn in your own desktop browser and shown as an image after a few seconds; it is not available on mobile devices). Open the links in a browser to view or save the image, to edit the map, or to see it in 3D. The local server returns the same three links after saving the PNG.
 
 ## Tools
 
