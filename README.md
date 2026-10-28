@@ -1,8 +1,12 @@
+English | [日本語](https://github.com/toruproject/mapnetwork-mcp/blob/main/README.ja.md)
+
 # mapnetwork-mcp
 
 MCP server for [MapNetwork](https://mapnetwork.app) — turn places in Japan into styled, illustration-like map images (PNG / SVG), directly from Claude or any MCP-compatible AI assistant.
 
 Maps are built from detailed OpenStreetMap data served by MapNetwork's own Overpass API for Japan, so coverage is currently limited to **Japan (country code JP)** — requests for places outside Japan return an error.
+
+Since MapNetwork is built for Japan, a Japanese version of this README is also available: [README.ja.md](https://github.com/toruproject/mapnetwork-mcp/blob/main/README.ja.md).
 
 ## Features
 
@@ -17,18 +21,25 @@ Maps are built from detailed OpenStreetMap data served by MapNetwork's own Overp
 
 ## Example Usage
 
-**Prompt:** "Generate a map around the 21st Century Museum of Contemporary Art, Kanazawa."
+**Prompt:** "城崎温泉の外湯を地図にして。" (Make a map of the public bathhouses of Kinosaki Onsen.)
 
-Here is the map it generated:
-<img src="https://raw.githubusercontent.com/toruproject/mapnetwork-mcp/main/images/Kanazawa21Museum-white.png" width="400" alt="Map Drawing Example">
+The map it generated, saved to your Downloads folder:
 
-**Prompt:** "Redownload that map in a few different color themes."
+<img src="https://raw.githubusercontent.com/toruproject/mapnetwork-mcp/main/images/KinosakiSotoyu-download.png" width="600" alt="Map of the public bathhouses of Kinosaki Onsen">
 
-The same map, redownloaded in different color themes:
+The result also includes three links. Open them in a browser to get more out of the same map — no need to regenerate.
 
-|                                                        Dark Green Style                                                         |                       Light Green Style                        |                          Pop Art Style                           |                        Black Style                        |
-|:-------------------------------------------------------------------------------------------------------------------------------:|:--------------------------------------------------------------:|:----------------------------------------------------------------:|:---------------------------------------------------------:|
-| <img src="https://raw.githubusercontent.com/toruproject/mapnetwork-mcp/main/images/Kanazawa21Museum-darkGreen.png" width="160"> | <img src="https://raw.githubusercontent.com/toruproject/mapnetwork-mcp/main/images/Kanazawa21Museum-lightGreen.png" width="160"> | <img src="https://raw.githubusercontent.com/toruproject/mapnetwork-mcp/main/images/Kanazawa21Museum-popArt.png" width="160"> | <img src="https://raw.githubusercontent.com/toruproject/mapnetwork-mcp/main/images/Kanazawa21Museum-black.png" width="160"> |
+**Download link** — change the color theme by editing the link's `colorSet` parameter (here `&colorSet=black`):
+
+<img src="https://raw.githubusercontent.com/toruproject/mapnetwork-mcp/main/images/KinosakiSotoyu-black.png" width="600" alt="The same map in the black color theme">
+
+**View 3D link** — a 3D rendering of the map, drawn in your desktop browser and shown as an image:
+
+<img src="https://raw.githubusercontent.com/toruproject/mapnetwork-mcp/main/images/KinosakiSotoyu-view3d.png" width="600" alt="3D rendering of the map">
+
+**Open in editor link** — customize the map by hand in the MapNetwork web editor (here: buildings hidden, patchwork turned on, and the popArt color theme applied):
+
+<img src="https://raw.githubusercontent.com/toruproject/mapnetwork-mcp/main/images/KinosakiSotoyu-popArt.png" width="600" alt="The map customized in the web editor">
 
 ## Installation
 
