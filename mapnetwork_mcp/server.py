@@ -15,15 +15,16 @@ from mcp.server.fastmcp import Context, FastMCP, Image
 from pydantic import BaseModel, ConfigDict, Field
 
 BASE_URL = os.environ.get("MAPNETWORK_BASE_URL", "https://mapnetwork.app")
-# カラーセット(color_set)。generate_*の保存するPNGの色と、結果のリンクの色。指定が無い時のリンクの色は、リンクごとの初期の色
-# (保存するPNGは、地図に保存された色のまま)
-ColorSet = Literal["darkBlue", "darkGreen", "popArt", "lightBlue", "lightGreen", "beige", "magenta", "white", "gray", "black", "brown"]
-DEFAULT_LINK_COLOR_SETS = {"download": "darkGreen", "editor": "darkGreen", "download3d": "lightGreen"}
+# 結果のリンクのカラーセット(&colorSet=...)。generate_*はカラーセットを指定できない(MCPのホストが色を指定できるほど正確に
+# 扱えないため)ので、リンクごとの決まった色を付ける。バックエンドの/statusが同じ色を付けて返す場合(新しいバージョン)は
+# そのまま使い、色の無いリンクや、3Dのリンクを返さない古いバージョンでは、ここで補う
+LINK_COLOR_SETS = {"download": "darkGreen", "editor": "darkGreen", "download3d": "lightGreen"}
 
 
-def _with_color(url: str, color_set: str | None, link: str) -> str:
-    """リンク(/status が返すURL。クエリを持つ)に&colorSet=...を加える。color_setが無ければ、リンクごとの初期の色。"""
-    return f"{url}&colorSet={color_set or DEFAULT_LINK_COLOR_SETS[link]}"
+def _with_default_color(url: str, link: str) -> str:
+    """リンクに&colorSet=...が無ければ、リンクごとの決まった色を加える。"""
+    return url if "colorSet=" in url else f"{url}&colorSet={LINK_COLOR_SETS[link]}"
+
 POLL_INTERVAL_SEC = 10.0
 MAX_WAIT_SEC = 600
 # MCPクライアントによっては、report_progressで進捗通知を送ってもtools/call自体の
@@ -69,9 +70,8 @@ mcp = FastMCP(
         "pinned places' websites.\n"
         "- **Walking/driving route**: `generate_route_map(from=..., to=..., mode=...)` — computes a "
         "route between two places and draws it on the map.\n"
-        "- Every generate_* tool takes an optional `color_set` (color theme) used for the saved PNG and added to the "
-        "result links; see 'Important: re-download without regenerating' below to change the theme or format later "
-        "without regenerating.\n\n"
+        "- Every generate_* call produces a PNG at the default color theme — see 'Important: "
+        "re-download without regenerating' below to change the theme or format without regenerating.\n\n"
         "## If generation is still in progress\n"
         "For busy areas, any generate_* tool may return before the map is ready, with a `dataKey` "
         "and a message asking you to check back. In that case, call `download_map(data_key=...)` — "
@@ -103,11 +103,6 @@ mcp = FastMCP(
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-COLOR_SET_DESCRIPTION = (
-    "Optional: color theme for the saved PNG and the result links. If omitted, the saved PNG keeps the map's own "
-    "colors, and the links use darkGreen (Download, Open in editor) and lightGreen (Download 3D)."
-)
 
 def _make_filename(label: str, format: str) -> Path:
     slug = re.sub(r"_+", "_", re.sub(r"[^\w぀-鿿]", "_", label)).strip("_")[:40]
@@ -163,19 +158,14 @@ async def _poll_with_budget(
         elapsed += POLL_INTERVAL_SEC
 
 
-def _build_success_result(image_bytes: bytes, out_path: Path, data_key: str, status_json: dict,
-                          color_set: str | None = None) -> list:
+def _build_success_result(image_bytes: bytes, out_path: Path, data_key: str, status_json: dict) -> list:
     out_path.write_bytes(image_bytes)
-    download_url = _with_color(status_json["downloadUrl"], color_set, "download")
-    editor_url = _with_color(status_json["editorUrl"], color_set, "editor")
-    # 古いバックエンド(download3dUrlを返さない)では、3Dのリンクは付けない
-    download3d_url = (
-        _with_color(status_json["download3dUrl"], color_set, "download3d") if status_json.get("download3dUrl") else None
-    )
-    download3d_line = (
-        f"Download 3D (opens a 3D rendering of the map as an image in your browser): {download3d_url}\n"
-        if download3d_url else ""
-    )
+    download_url = _with_default_color(status_json["downloadUrl"], "download")
+    editor_url = _with_default_color(status_json["editorUrl"], "editor")
+    # 3D地図の画像を利用者のブラウザで作って表示するページ。古いバックエンド(download3dUrlを返さない)では、自前で組み立てる
+    download3d_url = _with_default_color(
+        status_json.get("download3dUrl") or f"{BASE_URL}/download3d?dataKey={data_key}", "download3d")
+    download3d_line = f"Download 3D (opens a 3D rendering of the map as an image in your browser): {download3d_url}\n"
     return [
         Image(data=image_bytes, format="png"),
         (
@@ -211,8 +201,7 @@ def _still_in_progress_result(data_key: str) -> list:
     )]
 
 
-async def _generate_map_common(body: dict, ctx: Context | None, label: str | None = None,
-                               color_set: str | None = None) -> list:
+async def _generate_map_common(body: dict, ctx: Context | None, label: str | None = None) -> list:
     """3つのgenerate_*ツール共通のenqueue→poll→download→結果構築フロー。
     downloadUrl/editorUrlは/statusレスポンスに含まれるものをそのまま使う(自前で組み立てない)。
     ダウンロードファイル名は、/statusレスポンスの"name"(バックエンドが決めたconfigDict.name。
@@ -220,8 +209,8 @@ async def _generate_map_common(body: dict, ctx: Context | None, label: str | Non
     明示していればbody["name"]としてバックエンドへ渡り、そのままconfigDict.nameになる。
     省略時はバックエンド側がplace/markers/routeから同じ表示名を自動で導出する。labelは
     /statusにnameが含まれない場合(古いバックエンド等)だけのフォールバックとして使う。
-    format="png"でダウンロードする。color_setの指定があればその色で取り、無ければ地図に保存された色のまま
-    (別の見た目が欲しければredownload_mapで取り直す)。color_setは結果のリンクにも加える。"""
+    常にformat="png"・デフォルトcolor_setでダウンロードする(別の見た目が欲しければ
+    redownload_mapで取り直す)。"""
     async with httpx.AsyncClient() as client:
         # 1. Enqueue
         resp = await client.post(f"{BASE_URL}/request", json=body, timeout=30)
@@ -248,12 +237,10 @@ async def _generate_map_common(body: dict, ctx: Context | None, label: str | Non
             return _still_in_progress_result(data_key)
 
         # 3. Download(downloadUrl/editorUrlは/statusレスポンスに既に含まれている)
-        image_bytes = await _download(client, data_key, "png", color_set)
+        image_bytes = await _download(client, data_key, "png", None)
 
     filename_base = status_json.get("name") or label or data_key
-    return _build_success_result(
-        image_bytes, _make_filename(filename_base, "png"), data_key, status_json, color_set,
-    )
+    return _build_success_result(image_bytes, _make_filename(filename_base, "png"), data_key, status_json)
 
 
 # ---------------------------------------------------------------------------
@@ -267,7 +254,6 @@ async def generate_map(
         str | None,
         Field(description="Optional: display name for the map. If omitted, the server derives one automatically from place."),
     ] = None,
-    color_set: Annotated[ColorSet | None, Field(description=COLOR_SET_DESCRIPTION)] = None,
     ctx: Context = None,
 ) -> list:
     """Generate a styled map centered on a single place.
@@ -277,7 +263,7 @@ async def generate_map(
     body: dict = {"place": place}
     if name:
         body["name"] = name
-    return await _generate_map_common(body, ctx, label=place, color_set=color_set)
+    return await _generate_map_common(body, ctx, label=place)
 
 
 # ---------------------------------------------------------------------------
@@ -297,7 +283,6 @@ async def generate_markers_map(
         str | None,
         Field(description="Optional: display name for the map. If omitted, the server derives one automatically from place/markers."),
     ] = None,
-    color_set: Annotated[ColorSet | None, Field(description=COLOR_SET_DESCRIPTION)] = None,
     ctx: Context = None,
 ) -> list:
     """Generate a map with multiple pinned locations.
@@ -312,7 +297,7 @@ async def generate_markers_map(
         body["place"] = place
     if name:
         body["name"] = name
-    return await _generate_map_common(body, ctx, label=label, color_set=color_set)
+    return await _generate_map_common(body, ctx, label=label)
 
 
 # ---------------------------------------------------------------------------
@@ -335,7 +320,6 @@ async def generate_route_map(
         str | None,
         Field(description="Optional: display name for the map. If omitted, the server derives one automatically from place/route."),
     ] = None,
-    color_set: Annotated[ColorSet | None, Field(description=COLOR_SET_DESCRIPTION)] = None,
     ctx: Context = None,
 ) -> list:
     """Compute a walking/driving route between two places and generate a map with it overlaid.
@@ -353,7 +337,7 @@ async def generate_route_map(
         body["place"] = place
     if name:
         body["name"] = name
-    return await _generate_map_common(body, ctx, label=label, color_set=color_set)
+    return await _generate_map_common(body, ctx, label=label)
 
 
 # ---------------------------------------------------------------------------
