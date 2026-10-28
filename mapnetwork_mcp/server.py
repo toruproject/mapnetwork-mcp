@@ -165,15 +165,15 @@ def _build_success_result(image_bytes: bytes, out_path: Path, data_key: str, sta
     # 3D地図の画像を利用者のブラウザで作って表示するページ。古いバックエンド(download3dUrlを返さない)では、自前で組み立てる
     download3d_url = _with_default_color(
         status_json.get("download3dUrl") or f"{BASE_URL}/download3d?dataKey={data_key}", "download3d")
-    download3d_line = f"Download 3D (opens a 3D rendering of the map as an image in your browser): {download3d_url}\n"
+    download3d_line = f"Download 3D (opens a 3D rendering of the map as an image in your browser): {download3d_url}\n\n"
     return [
         Image(data=image_bytes, format="png"),
         (
             f"Map saved: {out_path}\n"
             f"dataKey: {data_key}\n\n"
-            f"Download: {download_url}\n"
-            f"Open in editor: {editor_url}\n"
-            f"{download3d_line}\n"
+            f"Download: {download_url}\n\n"
+            f"Open in editor: {editor_url}\n\n"
+            f"{download3d_line}"
             f"Tip: call redownload_map(data_key='{data_key}', ...) to get this map "
             f"in a different color theme or format (svg/png) without regenerating."
         ),
