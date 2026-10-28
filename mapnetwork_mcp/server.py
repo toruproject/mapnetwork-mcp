@@ -18,7 +18,7 @@ BASE_URL = os.environ.get("MAPNETWORK_BASE_URL", "https://mapnetwork.app")
 # 結果のリンクのカラーセット(&colorSet=...)。generate_*はカラーセットを指定できない(MCPのホストが色を指定できるほど正確に
 # 扱えないため)ので、リンクごとの決まった色を付ける。バックエンドの/statusが同じ色を付けて返す場合(新しいバージョン)は
 # そのまま使い、色の無いリンクや、3Dのリンクを返さない古いバージョンでは、ここで補う
-LINK_COLOR_SETS = {"download": "darkGreen", "editor": "darkGreen", "download3d": "lightGreen"}
+LINK_COLOR_SETS = {"download": "darkGreen", "editor": "darkGreen", "view3d": "lightGreen"}
 
 
 def _with_default_color(url: str, link: str) -> str:
@@ -87,8 +87,9 @@ mcp = FastMCP(
         "MapNetwork supports 11 color themes (white, darkBlue, darkGreen, popArt, lightBlue, "
         "lightGreen, beige, magenta, gray, black, brown).\n\n"
         "## Sharing the generated map\n"
-        "Every successful result includes a Download link, an 'Open in editor' link, and a Download 3D link "
-        "(opens a 3D rendering of the map as an image in the user's browser) — mention them to the user.\n\n"
+        "Every successful result includes a Download link, an 'Open in editor' link, and a View 3D link "
+        "(a 3D rendering of the map, drawn in the user's own desktop browser and shown as an image after a few seconds — "
+        "for the user to open, not for you to fetch; not available on mobile devices) — mention them to the user.\n\n"
         "## Parameter discipline\n"
         "- **place/label**: `place`, a marker's `label`, and route's `from`/`to` must each be a "
         "place name specific enough for the server to geocode it to a single, unambiguous "
@@ -162,10 +163,10 @@ def _build_success_result(image_bytes: bytes, out_path: Path, data_key: str, sta
     out_path.write_bytes(image_bytes)
     download_url = _with_default_color(status_json["downloadUrl"], "download")
     editor_url = _with_default_color(status_json["editorUrl"], "editor")
-    # 3D地図の画像を利用者のブラウザで作って表示するページ。古いバックエンド(download3dUrlを返さない)では、自前で組み立てる
-    download3d_url = _with_default_color(
-        status_json.get("download3dUrl") or f"{BASE_URL}/download3d?dataKey={data_key}", "download3d")
-    download3d_line = f"Download 3D (opens a 3D rendering of the map as an image in your browser): {download3d_url}\n\n"
+    # 3D地図の画像を利用者のブラウザで作って表示するページ。古いバックエンド(view3dUrlを返さない)では、自前で組み立てる
+    view3d_url = _with_default_color(
+        status_json.get("view3dUrl") or f"{BASE_URL}/view3d?dataKey={data_key}", "view3d")
+    view3d_line = f"View 3D (a 3D rendering of this map, drawn in the user's own desktop browser and shown as an image after a few seconds; for the user to open — not for you to fetch; not available on mobile devices): {view3d_url}\n\n"
     return [
         Image(data=image_bytes, format="png"),
         (
@@ -173,7 +174,7 @@ def _build_success_result(image_bytes: bytes, out_path: Path, data_key: str, sta
             f"dataKey: {data_key}\n\n"
             f"Download: {download_url}\n\n"
             f"Open in editor: {editor_url}\n\n"
-            f"{download3d_line}"
+            f"{view3d_line}"
             f"Tip: call redownload_map(data_key='{data_key}', ...) to get this map "
             f"in a different color theme or format (svg/png) without regenerating."
         ),
