@@ -12,6 +12,7 @@ from typing import Annotated, Literal
 
 import httpx
 from mcp.server.fastmcp import Context, FastMCP, Image
+from mcp.types import ToolAnnotations
 from pydantic import BaseModel, ConfigDict, Field
 
 BASE_URL = os.environ.get("MAPNETWORK_BASE_URL", "https://mapnetwork.app")
@@ -248,7 +249,7 @@ async def _generate_map_common(body: dict, ctx: Context | None, label: str | Non
 # Tool: generate_map
 # ---------------------------------------------------------------------------
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(title="Generate a map of a place", readOnlyHint=False, destructiveHint=False, openWorldHint=True))
 async def generate_map(
     place: Annotated[str, Field(description="Place name to center the map on (geocoded server-side).")],
     name: Annotated[
@@ -271,7 +272,7 @@ async def generate_map(
 # Tool: generate_markers_map
 # ---------------------------------------------------------------------------
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(title="Generate a map with markers", readOnlyHint=False, destructiveHint=False, openWorldHint=True))
 async def generate_markers_map(
     markers: Annotated[
         list[Marker], Field(description="Locations to pin on the map. At least one required.")
@@ -305,7 +306,7 @@ async def generate_markers_map(
 # Tool: generate_route_map
 # ---------------------------------------------------------------------------
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(title="Generate a route map", readOnlyHint=False, destructiveHint=False, openWorldHint=True))
 async def generate_route_map(
     # Pythonの予約語のため実引数名は'from_'。JSON上のキー名はvalidation_aliasで'from'にする
     # (Field(alias=...)だとFastMCPが関数呼び出し時もalias名でキーワード引数を組み立てて
@@ -345,7 +346,7 @@ async def generate_route_map(
 # Tool: download_map
 # ---------------------------------------------------------------------------
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(title="Download a pending map", readOnlyHint=False, destructiveHint=False, openWorldHint=True))
 async def download_map(
     data_key: Annotated[
         str,
@@ -378,7 +379,7 @@ async def download_map(
 # Tool: redownload_map
 # ---------------------------------------------------------------------------
 
-@mcp.tool()
+@mcp.tool(annotations=ToolAnnotations(title="Re-download a map in another theme or format", readOnlyHint=False, destructiveHint=False, openWorldHint=True))
 async def redownload_map(
     data_key: Annotated[str, Field(description="The dataKey returned by a previous generate_* call.")],
     color_set: Annotated[

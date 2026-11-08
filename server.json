@@ -1,6 +1,15 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "io.github.toruproject/mapnetwork-mcp",
+  "title": "MapNetwork",
+  "websiteUrl": "https://mapnetwork.app",
+  "icons": [
+    {
+      "src": "https://mapnetwork.app/images/mcp-icon.png",
+      "mimeType": "image/png",
+      "sizes": ["256x256"]
+    }
+  ],
   "description": "Generate styled PNG/SVG map images of places in Japan with 11 customizable color themes.",
   "repository": {
     "url": "https://github.com/toruproject/mapnetwork-mcp",
