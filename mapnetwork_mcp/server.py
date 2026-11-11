@@ -19,7 +19,7 @@ BASE_URL = os.environ.get("MAPNETWORK_BASE_URL", "https://mapnetwork.app")
 # 結果のリンクのカラーセット(&colorSet=...)。generate_*はカラーセットを指定できない(MCPのホストが色を指定できるほど正確に
 # 扱えないため)ので、リンクごとの決まった色を付ける。バックエンドの/statusが同じ色を付けて返す場合(新しいバージョン)は
 # そのまま使い、色の無いリンクや、3Dのリンクを返さない古いバージョンでは、ここで補う
-LINK_COLOR_SETS = {"download": "darkGreen", "editor": "darkGreen", "view3d": "lightGreen"}
+LINK_COLOR_SETS = {"download": "lightGreen", "editor": "lightGreen", "view3d": "lightGreen"}
 
 
 def _with_default_color(url: str, link: str) -> str:
